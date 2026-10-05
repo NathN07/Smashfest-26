@@ -17,7 +17,6 @@ const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 let firebaseConfig = {
-  // If deploying to Vercel, replace these with your actual Firebase Project config!
   apiKey: "YOUR_API_KEY",
   authDomain: "YOUR_AUTH_DOMAIN",
   projectId: "YOUR_PROJECT_ID",
@@ -153,6 +152,9 @@ const calculateGroupStandings = (teams, matches, settings) => {
       const a = match.teamAId;
       const b = match.teamBId;
       
+      // FIX 1: Prevent crash if team is not in current standings calculation (e.g. KO matches)
+      if (!standings[a] || !standings[b]) return;
+      
       standings[a].MP++;
       standings[b].MP++;
 
@@ -273,14 +275,15 @@ const tournamentReducer = (state, action) => {
       const stA = calculateGroupStandings(state.teams.filter(t=>t.group==='A'), state.matches, state.settings);
       const stB = calculateGroupStandings(state.teams.filter(t=>t.group==='B'), state.matches, state.settings);
       
+      // FIX 2: Fixed astB typo and added safe optional chaining
       const sf1 = {
         id: 'ko_sf1', groupId: 'KO', round: 'SF',
-        teamAId: stA[0].id, teamBId: astB[1].id,
+        teamAId: stA[0]?.id || null, teamBId: stB[1]?.id || null,
         status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', time: '14:00'
       };
       const sf2 = {
         id: 'ko_sf2', groupId: 'KO', round: 'SF',
-        teamAId: stB[0].id, teamBId: stA[1].id,
+        teamAId: stB[0]?.id || null, teamBId: stA[1]?.id || null,
         status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', time: '14:00'
       };
       const final = {
@@ -317,7 +320,6 @@ const TournamentProvider = ({ children }) => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [dbUser, setDbUser] = useState(null);
 
-  // Load from LocalStorage
   useEffect(() => {
     const saved = localStorage.getItem('smashfest_state');
     if (saved) {
@@ -326,14 +328,12 @@ const TournamentProvider = ({ children }) => {
     setIsLoaded(true);
   }, []);
 
-  // Save to LocalStorage
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem('smashfest_state', JSON.stringify(state));
     }
   }, [state, isLoaded]);
 
-  // Authenticate Firebase
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -397,7 +397,6 @@ const Modal = ({ isOpen, onClose, title, children }) => {
   );
 };
 
-// Custom Confirm/Alert Dialog to avoid browser prompts
 const DialogContext = createContext();
 const DialogProvider = ({ children }) => {
   const [dialog, setDialog] = useState(null);
@@ -569,7 +568,6 @@ const Fixtures = ({ onNavigate }) => {
       }
       
       const matchesToAdd = [];
-      // Skip header row, start from index 1
       for (let i = 1; i < rows.length; i++) {
         const cols = rows[i].split(',').map(c => c.trim());
         if (cols.length >= 2) {
@@ -606,11 +604,11 @@ const Fixtures = ({ onNavigate }) => {
         dispatch({ type: 'ADD_BULK_MATCHES', payload: matchesToAdd });
         dialog.alert("Success", `Successfully imported ${matchesToAdd.length} matches from CSV!`);
       } else {
-        dialog.alert("Error", "Could not find matching teams. Make sure Column 1 and Column 2 contain valid Team Codes (e.g. D1, D5).");
+        dialog.alert("Error", "Could not find matching teams. Make sure Column 1 and Column 2 contain valid Team Codes.");
       }
     };
     reader.readAsText(file);
-    e.target.value = ''; // Reset input
+    e.target.value = ''; 
   };
 
   const handleQuickScore = (e) => {
@@ -774,7 +772,6 @@ const Fixtures = ({ onNavigate }) => {
         </div>
       )}
 
-      {/* Modals for Custom Match and Quick Score */}
       <Modal isOpen={isCreating} onClose={() => setIsCreating(false)} title="Create Custom Match">
         <form onSubmit={handleCreateCustomMatch} className="space-y-4">
           <div>
@@ -1076,28 +1073,71 @@ const KnockoutBracket = ({ onNavigate }) => {
     runnerUp = state.teams.find(t => t.id === (finalMatch.teamAId === finalMatch.winnerId ? finalMatch.teamBId : finalMatch.teamAId));
   }
 
+  // FIX 3: Fully Re-designed MatchBox with Live Scoring Button logic
   const MatchBox = ({ match, title }) => {
     if (!match) return (
-      <div className="bg-slate-900 border-2 border-dashed border-slate-800 rounded-xl p-4 w-64 h-24 flex items-center justify-center text-slate-500 font-bold text-sm">
-        TBD
-      </div>
+      <Card className="flex flex-col justify-center items-center h-32 border-dashed border-slate-700 bg-slate-900/50">
+        <span className="text-slate-500 font-bold text-sm">{title}</span>
+        <span className="text-slate-600 text-xs mt-1">TBD</span>
+      </Card>
     );
-    const tA = state.teams.find(t=>t.id===match.teamAId);
-    const tB = state.teams.find(t=>t.id===match.teamBId);
+    
+    const teamA = state.teams.find(t => t.id === match.teamAId);
+    const teamB = state.teams.find(t => t.id === match.teamBId);
     const isClickable = match.teamAId && match.teamBId;
+
     return (
-      <div className={`bg-slate-900 border ${isClickable ? 'border-slate-700 hover:border-emerald-500 cursor-pointer shadow-lg' : 'border-slate-800 opacity-70'} rounded-xl p-3 w-64 transition-colors`}
-        onClick={() => isClickable && onNavigate('live', match.id)}
-      >
-        <div className="text-[10px] text-slate-500 font-bold uppercase mb-2 text-center">{title}</div>
-        <div className={`flex justify-between p-1 rounded ${match.teamAId && match.winnerId === match.teamAId ? 'bg-emerald-500/20 text-emerald-400 font-bold' : 'text-slate-300'}`}>
-          <span className="truncate pr-2">{tA ? `${tA.code} (${tA.player1})` : 'TBD'}</span>
+      <Card className="relative overflow-hidden group w-72 lg:w-80 border-slate-700/50">
+        {match.status === 'live' && <div className="absolute top-0 left-0 w-1 h-full bg-red-500"></div>}
+        {match.status === 'completed' && <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>}
+        
+        <div className="flex justify-between items-center mb-3">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{title}</div>
+          <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider
+            ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':
+              match.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800 text-slate-400'}`}>
+            {match.status}
+          </span>
         </div>
-        <div className="h-px bg-slate-800 my-1"></div>
-        <div className={`flex justify-between p-1 rounded ${match.teamBId && match.winnerId === match.teamBId ? 'bg-emerald-500/20 text-emerald-400 font-bold' : 'text-slate-300'}`}>
-          <span className="truncate pr-2">{tB ? `${tB.code} (${tB.player1})` : 'TBD'}</span>
+
+        <div className="space-y-3">
+          <div className={`flex justify-between items-center ${match.winnerId === match.teamAId ? 'text-emerald-400 font-bold' : 'text-slate-200'}`}>
+            <div className="flex gap-2 items-center">
+              <span className="w-6 text-sm opacity-50">{teamA?.code || '?'}</span>
+              <span className="text-sm truncate max-w-[120px]">{teamA?.player1 || 'TBD'}</span>
+            </div>
+            {match.status === 'completed' && match.teamAId && (
+              <span className="text-lg">{match.scores.filter(s=>s.a>s.b).length}</span>
+            )}
+          </div>
+          <div className={`flex justify-between items-center ${match.winnerId === match.teamBId ? 'text-emerald-400 font-bold' : 'text-slate-200'}`}>
+            <div className="flex gap-2 items-center">
+              <span className="w-6 text-sm opacity-50">{teamB?.code || '?'}</span>
+              <span className="text-sm truncate max-w-[120px]">{teamB?.player1 || 'TBD'}</span>
+            </div>
+            {match.status === 'completed' && match.teamBId && (
+              <span className="text-lg">{match.scores.filter(s=>s.b>s.a).length}</span>
+            )}
+          </div>
         </div>
-      </div>
+
+        {match.status !== 'completed' && isClickable && (
+          <div className="mt-4 pt-4 border-t border-slate-800">
+            <Button 
+              className="w-full text-xs py-1.5" 
+              variant={match.status === 'live' ? 'primary' : 'secondary'}
+              onClick={() => {
+                if(match.status === 'upcoming') {
+                  dispatch({ type: 'UPDATE_MATCH', payload: { id: match.id, updates: { status: 'live' } }});
+                }
+                onNavigate('live', match.id);
+              }}
+            >
+              {match.status === 'live' ? 'Resume Scoring' : 'Live Scoring'}
+            </Button>
+          </div>
+        )}
+      </Card>
     )
   };
 
@@ -1116,8 +1156,8 @@ const KnockoutBracket = ({ onNavigate }) => {
             <MatchBox match={sf2} title="Semifinal 2 (B1 vs A2)" />
             {(sf1 || sf2) && (
               <svg className="absolute left-full top-0 w-12 h-full pointer-events-none -z-10 text-slate-700">
-                 <path d="M0,48 L24,48 L24,176 L0,176" fill="none" stroke="currentColor" strokeWidth="2" />
-                 <path d="M24,112 L48,112" fill="none" stroke="currentColor" strokeWidth="2" />
+                 <path d="M0,80 L24,80 L24,240 L0,240" fill="none" stroke="currentColor" strokeWidth="2" />
+                 <path d="M24,160 L48,160" fill="none" stroke="currentColor" strokeWidth="2" />
               </svg>
             )}
           </div>
@@ -1162,7 +1202,6 @@ const HallOfFame = () => {
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Sort client-side to avoid needing complex Firestore indexes
       data.sort((a, b) => b.createdAt - a.createdAt);
       setHistory(data);
       setLoading(false);
@@ -1457,7 +1496,6 @@ const AppLayout = () => {
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-300 font-sans selection:bg-emerald-500/30">
-      {/* Desktop Sidebar */}
       <aside className="hidden md:flex flex-col w-64 border-r border-slate-800 bg-slate-950/50">
         <div className="p-6">
           <div className="flex items-center gap-3 text-emerald-500 font-black text-xl tracking-tighter">
@@ -1485,7 +1523,6 @@ const AppLayout = () => {
         </nav>
       </aside>
 
-      {/* Main Content Area */}
       <main className="flex-1 overflow-y-auto overflow-x-hidden pb-24 md:pb-0 relative">
         <div className="max-w-6xl mx-auto p-4 md:p-8">
           {activeTab === 'dashboard' && <Dashboard onNavigate={handleNavigate} />}
@@ -1499,7 +1536,6 @@ const AppLayout = () => {
         </div>
       </main>
 
-      {/* Mobile Bottom Nav */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950 border-t border-slate-800 flex justify-around p-2 pb-safe z-50 overflow-x-auto">
         {navItems.map(item => {
           const Icon = item.icon;
