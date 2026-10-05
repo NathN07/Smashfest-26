@@ -215,9 +215,14 @@ const tournamentReducer = (state, action) => {
         scores: [],
         winnerId: null,
         table: action.payload.table || 'Table 1',
+        date: action.payload.date || '',
         time: action.payload.time || '12:00'
       };
       return { ...state, matches: [...state.matches, newMatch] };
+    }
+
+    case 'ADD_BULK_MATCHES': {
+      return { ...state, matches: [...state.matches, ...action.payload] };
     }
 
     case 'GENERATE_FIXTURES': {
@@ -270,7 +275,7 @@ const tournamentReducer = (state, action) => {
       
       const sf1 = {
         id: 'ko_sf1', groupId: 'KO', round: 'SF',
-        teamAId: stA[0].id, teamBId: stB[1].id,
+        teamAId: stA[0].id, teamBId: astB[1].id,
         status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', time: '14:00'
       };
       const sf2 = {
@@ -543,11 +548,69 @@ const Fixtures = ({ onNavigate }) => {
         teamBId: fd.get('teamB'),
         groupId: fd.get('groupId'),
         table: fd.get('table'),
+        date: fd.get('date'),
         time: fd.get('time')
       }
     });
     setIsCreating(false);
     dialog.alert("Success", "Custom match created successfully!");
+  };
+
+  const handleCSVImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      const rows = text.split('\n').map(r => r.trim()).filter(r => r);
+      if (rows.length < 2) {
+        dialog.alert("Error", "CSV file seems empty. Please include a header row and data.");
+        return;
+      }
+      
+      const matchesToAdd = [];
+      // Skip header row, start from index 1
+      for (let i = 1; i < rows.length; i++) {
+        const cols = rows[i].split(',').map(c => c.trim());
+        if (cols.length >= 2) {
+          const tACode = cols[0];
+          const tBCode = cols[1];
+          const group = cols[2] || 'Custom';
+          const round = cols[3] || 'Custom';
+          const table = cols[4] || 'Table 1';
+          const date = cols[5] || '';
+          const time = cols[6] || '12:00';
+
+          const tA = state.teams.find(t => t.code.toLowerCase() === tACode.toLowerCase());
+          const tB = state.teams.find(t => t.code.toLowerCase() === tBCode.toLowerCase());
+
+          if (tA && tB) {
+            matchesToAdd.push({
+              id: `csv_${crypto.randomUUID()}`,
+              groupId: group,
+              round: round,
+              teamAId: tA.id,
+              teamBId: tB.id,
+              status: 'upcoming',
+              scores: [],
+              winnerId: null,
+              table: table,
+              date: date,
+              time: time
+            });
+          }
+        }
+      }
+
+      if (matchesToAdd.length > 0) {
+        dispatch({ type: 'ADD_BULK_MATCHES', payload: matchesToAdd });
+        dialog.alert("Success", `Successfully imported ${matchesToAdd.length} matches from CSV!`);
+      } else {
+        dialog.alert("Error", "Could not find matching teams. Make sure Column 1 and Column 2 contain valid Team Codes (e.g. D1, D5).");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Reset input
   };
 
   const handleQuickScore = (e) => {
@@ -587,10 +650,14 @@ const Fixtures = ({ onNavigate }) => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <h2 className="text-2xl font-bold text-white">Fixtures & Schedule</h2>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button onClick={() => setIsCreating(true)} icon={Plus} variant="primary">
             Custom Match
           </Button>
+          <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-all active:scale-95 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700">
+             <UploadCloud size={18} /> CSV Upload
+             <input type="file" accept=".csv" className="hidden" onChange={handleCSVImport} />
+          </label>
           <Button onClick={handleGenerate} icon={RotateCcw} variant="secondary">
             Auto Generate
           </Button>
@@ -646,7 +713,7 @@ const Fixtures = ({ onNavigate }) => {
                       <div className="flex justify-between items-center mb-3">
                         <div className="flex gap-2 items-center text-xs text-slate-400">
                           <span className="font-mono bg-slate-800 px-2 py-0.5 rounded">{m.table}</span>
-                          <span>{m.time}</span>
+                          <span>{m.date ? `${m.date} | ` : ''}{m.time}</span>
                         </div>
                         <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider
                           ${m.status==='completed'?'bg-emerald-500/10 text-emerald-400':
@@ -734,10 +801,14 @@ const Fixtures = ({ onNavigate }) => {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-1">Table</label>
               <input name="table" defaultValue="Table 1" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1">Date</label>
+              <input name="date" type="date" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-emerald-500" />
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-1">Time</label>
