@@ -15,7 +15,7 @@ const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 // Storage key changed to auto-reset old data and load the exact requested setup
-const LOCAL_STORAGE_KEY = 'smashfest_state_v3'; 
+const LOCAL_STORAGE_KEY = 'smashfest_state_v5'; 
 
 let firebaseConfig = {
   apiKey: "YOUR_API_KEY",
@@ -40,13 +40,15 @@ const INITIAL_TEAMS = [
   { id: 't2', code: 'A2', player1: 'Madhwan', player2: 'Utkarsh', group: 'A', seed: 2 },
   { id: 't3', code: 'A3', player1: 'Vishal', player2: 'Vineet', group: 'A', seed: 3 },
   { id: 't4', code: 'A4', player1: 'Vishwash', player2: 'Himanshu', group: 'A', seed: 4 },
-  { id: 't5', code: 'A6', player1: 'Fazlu', player2: 'Chetan', group: 'A', seed: 5 },
+  { id: 't5', code: 'A5', player1: 'Moksh', player2: 'Nitin', group: 'A', seed: 5 },
+  { id: 't6', code: 'A6', player1: 'Fazlu', player2: 'Chetan', group: 'A', seed: 6 },
   
-  { id: 't6', code: 'B1', player1: 'Omm', player2: 'Shivam', group: 'B', seed: 1 },
-  { id: 't7', code: 'B2', player1: 'Himanshu', player2: 'Ansh', group: 'B', seed: 2 },
-  { id: 't8', code: 'B3', player1: 'Abhitesh', player2: 'Devansh', group: 'B', seed: 3 },
-  { id: 't9', code: 'B4', player1: 'Om', player2: 'Eklavya', group: 'B', seed: 4 },
-  { id: 't10', code: 'B6', player1: 'Nishant', player2: 'Taqi', group: 'B', seed: 5 },
+  { id: 't7', code: 'B1', player1: 'Omm', player2: 'Shivam', group: 'B', seed: 1 },
+  { id: 't8', code: 'B2', player1: 'Himanshu', player2: 'Ansh', group: 'B', seed: 2 },
+  { id: 't9', code: 'B3', player1: 'Abhitesh', player2: 'Devansh', group: 'B', seed: 3 },
+  { id: 't10', code: 'B4', player1: 'Om', player2: 'Eklavya', group: 'B', seed: 4 },
+  { id: 't11', code: 'B5', player1: 'Saloni', player2: 'A1', group: 'B', seed: 5 },
+  { id: 't12', code: 'B6', player1: 'Nishant', player2: 'Taqi', group: 'B', seed: 6 },
 ];
 
 const DEFAULT_SETTINGS = {
@@ -54,34 +56,52 @@ const DEFAULT_SETTINGS = {
   pointsWin: 2, pointsLoss: 0, bestOf: 3, pointsPerGame: 11, tables: 2,
 };
 
-// Pre-loaded Matches (Day 1 & Day 2 matched exactly to image, plus remaining RR and pre-built Knockouts)
+// Pre-loaded Matches (Day 1 to Day 7 exactly matched to images)
 const INITIAL_MATCHES = [
-  // DAY 1 (10/06/2026)
-  { id: 'm1', groupId: 'B', round: 'Day 01', teamAId: 't6', teamBId: 't7', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/06/2026', time: '10:00' },
-  { id: 'm2', groupId: 'B', round: 'Day 01', teamAId: 't8', teamBId: 't9', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/06/2026', time: '10:30' },
-  { id: 'm3', groupId: 'A', round: 'Day 01', teamAId: 't2', teamBId: 't3', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/06/2026', time: '11:00' },
-  { id: 'm4', groupId: 'A', round: 'Day 01', teamAId: 't1', teamBId: 't4', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/06/2026', time: '11:30' },
+  // DAY 01
+  { id: 'm1', groupId: 'B', round: 'Day 01', teamAId: 't7', teamBId: 't8', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/06/2026', time: '10:00' },
+  { id: 'm2', groupId: 'B', round: 'Day 01', teamAId: 't9', teamBId: 't10', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/06/2026', time: '10:00' },
+  { id: 'm3', groupId: 'A', round: 'Day 01', teamAId: 't2', teamBId: 't3', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/06/2026', time: '10:30' },
+  { id: 'm4', groupId: 'A', round: 'Day 01', teamAId: 't1', teamBId: 't4', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/06/2026', time: '10:30' },
   
-  // DAY 2 (10/07/2026)
-  { id: 'm5', groupId: 'B', round: 'Day 02', teamAId: 't6', teamBId: 't8', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/07/2026', time: '10:00' },
-  { id: 'm6', groupId: 'B', round: 'Day 02', teamAId: 't9', teamBId: 't10', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/07/2026', time: '10:30' },
-  { id: 'm7', groupId: 'A', round: 'Day 02', teamAId: 't2', teamBId: 't5', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/07/2026', time: '11:00' },
-  { id: 'm8', groupId: 'A', round: 'Day 02', teamAId: 't3', teamBId: 't4', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/07/2026', time: '11:30' },
+  // DAY 02
+  { id: 'm5', groupId: 'B', round: 'Day 02', teamAId: 't7', teamBId: 't9', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/07/2026', time: '10:00' },
+  { id: 'm6', groupId: 'B', round: 'Day 02', teamAId: 't10', teamBId: 't12', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/07/2026', time: '10:00' },
+  { id: 'm7', groupId: 'A', round: 'Day 02', teamAId: 't2', teamBId: 't6', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/07/2026', time: '10:30' },
+  { id: 'm8', groupId: 'A', round: 'Day 02', teamAId: 't3', teamBId: 't4', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/07/2026', time: '10:30' },
+  
+  // DAY 03
+  { id: 'm9', groupId: 'B', round: 'Day 03', teamAId: 't8', teamBId: 't12', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/08/2026', time: '10:00' },
+  { id: 'm10', groupId: 'B', round: 'Day 03', teamAId: 't10', teamBId: 't11', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/08/2026', time: '10:00' },
+  { id: 'm11', groupId: 'A', round: 'Day 03', teamAId: 't4', teamBId: 't6', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/08/2026', time: '10:30' },
+  { id: 'm12', groupId: 'A', round: 'Day 03', teamAId: 't3', teamBId: 't5', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/08/2026', time: '10:30' },
+  
+  // DAY 04
+  { id: 'm13', groupId: 'B', round: 'Day 04', teamAId: 't8', teamBId: 't10', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/09/2026', time: '10:00' },
+  { id: 'm14', groupId: 'B', round: 'Day 04', teamAId: 't9', teamBId: 't11', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/09/2026', time: '10:00' },
+  { id: 'm15', groupId: 'A', round: 'Day 04', teamAId: 't5', teamBId: 't6', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/09/2026', time: '10:30' },
+  { id: 'm16', groupId: 'A', round: 'Day 04', teamAId: 't1', teamBId: 't2', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/09/2026', time: '10:30' },
+  
+  // DAY 05
+  { id: 'm17', groupId: 'B', round: 'Day 05', teamAId: 't7', teamBId: 't11', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/12/2026', time: '10:00' },
+  { id: 'm18', groupId: 'B', round: 'Day 05', teamAId: 't9', teamBId: 't12', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/12/2026', time: '10:00' },
+  { id: 'm19', groupId: 'A', round: 'Day 05', teamAId: 't1', teamBId: 't6', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/12/2026', time: '10:30' },
+  { id: 'm20', groupId: 'A', round: 'Day 05', teamAId: 't4', teamBId: 't5', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/12/2026', time: '10:30' },
+  
+  // DAY 06
+  { id: 'm21', groupId: 'B', round: 'Day 06', teamAId: 't7', teamBId: 't10', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/13/2026', time: '10:00' },
+  { id: 'm22', groupId: 'B', round: 'Day 06', teamAId: 't8', teamBId: 't9', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/13/2026', time: '10:00' },
+  { id: 'm23', groupId: 'B', round: 'Day 06', teamAId: 't11', teamBId: 't12', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/13/2026', time: '10:30' },
+  { id: 'm24', groupId: 'A', round: 'Day 06', teamAId: 't2', teamBId: 't5', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/13/2026', time: '10:30' },
+  { id: 'm25', groupId: 'A', round: 'Day 06', teamAId: 't1', teamBId: 't3', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/13/2026', time: '11:00' },
 
-  // Remaining Round Robin
-  { id: 'm9', groupId: 'A', round: 'Day 03', teamAId: 't1', teamBId: 't5', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/08/2026', time: '10:00' },
-  { id: 'm10', groupId: 'A', round: 'Day 03', teamAId: 't1', teamBId: 't2', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/08/2026', time: '10:30' },
-  { id: 'm11', groupId: 'B', round: 'Day 03', teamAId: 't6', teamBId: 't10', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/08/2026', time: '11:00' },
-  { id: 'm12', groupId: 'B', round: 'Day 03', teamAId: 't7', teamBId: 't8', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/08/2026', time: '11:30' },
-  { id: 'm13', groupId: 'A', round: 'Day 04', teamAId: 't4', teamBId: 't5', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/09/2026', time: '10:00' },
-  { id: 'm14', groupId: 'A', round: 'Day 04', teamAId: 't1', teamBId: 't3', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/09/2026', time: '10:30' },
-  { id: 'm15', groupId: 'B', round: 'Day 04', teamAId: 't7', teamBId: 't9', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/09/2026', time: '11:00' },
-  { id: 'm16', groupId: 'B', round: 'Day 04', teamAId: 't7', teamBId: 't10', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/09/2026', time: '11:30' },
-  { id: 'm17', groupId: 'A', round: 'Day 05', teamAId: 't3', teamBId: 't5', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/10/2026', time: '10:00' },
-  { id: 'm18', groupId: 'A', round: 'Day 05', teamAId: 't2', teamBId: 't4', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/10/2026', time: '10:30' },
-  { id: 'm19', groupId: 'B', round: 'Day 05', teamAId: 't8', teamBId: 't10', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/10/2026', time: '11:00' },
-  { id: 'm20', groupId: 'B', round: 'Day 05', teamAId: 't6', teamBId: 't9', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/10/2026', time: '11:30' },
-  
+  // DAY 07
+  { id: 'm26', groupId: 'B', round: 'Day 07', teamAId: 't7', teamBId: 't12', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/14/2026', time: '10:00' },
+  { id: 'm27', groupId: 'B', round: 'Day 07', teamAId: 't8', teamBId: 't11', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/14/2026', time: '10:00' },
+  { id: 'm28', groupId: 'A', round: 'Day 07', teamAId: 't3', teamBId: 't6', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/14/2026', time: '10:30' },
+  { id: 'm29', groupId: 'A', round: 'Day 07', teamAId: 't2', teamBId: 't4', status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '10/14/2026', time: '10:30' },
+  { id: 'm30', groupId: 'A', round: 'Day 07', teamAId: 't1', teamBId: 't5', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/14/2026', time: '11:00' },
+
   // PRE-BUILT KNOCKOUTS (Auto Progression Enabled)
   { id: 'ko_sf1', groupId: 'KO', round: 'Semi-Final', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Center Court', date: '', time: '' },
   { id: 'ko_sf2', groupId: 'KO', round: 'Semi-Final', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Center Court', date: '', time: '' },
@@ -290,53 +310,6 @@ const DialogProvider = ({ children }) => {
 };
 const useDialog = () => useContext(DialogContext);
 
-const QuickScoreForm = ({ match, onClose }) => {
-  const { state, dispatch } = useContext(TournamentContext);
-  const dialog = useDialog();
-
-  const handleQuickScore = (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const scores = [];
-    for(let i=0; i<state.settings.bestOf; i++) {
-      const a = parseInt(fd.get(`g${i}a`));
-      const b = parseInt(fd.get(`g${i}b`));
-      if(!isNaN(a) && !isNaN(b)) scores.push({a, b});
-    }
-    if(scores.length === 0) { dialog.alert("Error", "Enter at least one game score."); return; }
-    
-    const winnerLetter = getMatchWinner(scores, state.settings.bestOf, state.settings.pointsPerGame);
-    let winnerId = null;
-    if (winnerLetter === 'A') winnerId = match.teamAId;
-    if (winnerLetter === 'B') winnerId = match.teamBId;
-
-    dispatch({ type: 'UPDATE_MATCH', payload: { id: match.id, updates: { scores, status: 'completed', winnerId } } });
-    onClose();
-    dialog.alert("Success", "Scores uploaded & teams progressed!");
-  };
-
-  return (
-    <Modal isOpen={!!match} onClose={onClose} title="Quick Score Upload">
-      <form onSubmit={handleQuickScore} className="space-y-4">
-        <div className="flex justify-between items-center text-sm font-bold text-slate-400 mb-2 px-4 border-b border-slate-800 pb-4">
-          <span className="w-1/2 text-right pr-4 text-white truncate">{state.teams.find(t=>t.id===match.teamAId)?.code} - {state.teams.find(t=>t.id===match.teamAId)?.player1}</span>
-          <span className="text-emerald-500">VS</span>
-          <span className="w-1/2 text-left pl-4 text-white truncate">{state.teams.find(t=>t.id===match.teamBId)?.code} - {state.teams.find(t=>t.id===match.teamBId)?.player1}</span>
-        </div>
-        {Array.from({length: state.settings.bestOf}).map((_, i) => (
-          <div key={i} className="flex gap-4 items-center justify-center">
-            <span className="text-xs font-bold text-slate-500 w-12">Game {i+1}</span>
-            <input type="number" name={`g${i}a`} className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white text-center focus:outline-none focus:border-emerald-500" placeholder="0" />
-            <span className="text-slate-500">-</span>
-            <input type="number" name={`g${i}b`} className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white text-center focus:outline-none focus:border-emerald-500" placeholder="0" />
-          </div>
-        ))}
-        <Button type="submit" className="w-full mt-6" variant="primary">Submit Score</Button>
-      </form>
-    </Modal>
-  );
-};
-
 const Dashboard = ({ onNavigate }) => {
   const { state } = useContext(TournamentContext);
   const groups = state.matches.filter(m => m.groupId !== 'KO');
@@ -378,7 +351,6 @@ const Dashboard = ({ onNavigate }) => {
 const Fixtures = ({ onNavigate }) => {
   const { state, dispatch } = useContext(TournamentContext);
   const [tab, setTab] = useState('ALL');
-  const [quickScoreMatch, setQuickScoreMatch] = useState(null);
 
   const filteredMatches = state.matches.filter(m => {
     if (m.groupId === 'KO') return false; 
@@ -454,10 +426,7 @@ const Fixtures = ({ onNavigate }) => {
                         <Button className="flex-1 text-xs py-1.5" variant={m.status === 'live' ? 'primary' : 'secondary'} onClick={() => {
                             if(m.status === 'upcoming') dispatch({ type: 'UPDATE_MATCH', payload: { id: m.id, updates: { status: 'live' } }});
                             onNavigate('live', m.id);
-                          }}>Live</Button>
-                        <Button className="flex-1 text-xs py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border-none" onClick={() => setQuickScoreMatch(m)}>
-                          Quick Score
-                        </Button>
+                          }}>{m.status === 'live' ? 'Resume Scoring' : 'Live'}</Button>
                       </div>
                     )}
                   </Card>
@@ -467,7 +436,6 @@ const Fixtures = ({ onNavigate }) => {
           </div>
         ))}
       </div>
-      {quickScoreMatch && <QuickScoreForm match={quickScoreMatch} onClose={() => setQuickScoreMatch(null)} />}
     </div>
   );
 };
@@ -475,7 +443,6 @@ const Fixtures = ({ onNavigate }) => {
 const KnockoutBracket = ({ onNavigate }) => {
   const { state, dispatch, dbUser } = useContext(TournamentContext);
   const dialog = useDialog();
-  const [quickScoreMatch, setQuickScoreMatch] = useState(null);
   
   const handleQualify = () => {
     const stA = calculateGroupStandings(state.teams.filter(t=>t.group==='A'), state.matches, state.settings);
@@ -540,10 +507,7 @@ const KnockoutBracket = ({ onNavigate }) => {
             <Button className="flex-1 text-xs py-1.5" variant={match.status === 'live' ? 'primary' : 'secondary'} onClick={() => {
                 if(match.status === 'upcoming') dispatch({ type: 'UPDATE_MATCH', payload: { id: match.id, updates: { status: 'live' } }});
                 onNavigate('live', match.id);
-              }}>Live Score</Button>
-            <Button className="flex-1 text-xs py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300" onClick={() => setQuickScoreMatch(match)}>
-              Quick Score
-            </Button>
+              }}>{match.status === 'live' ? 'Resume Scoring' : 'Live Score'}</Button>
           </div>
         )}
       </Card>
