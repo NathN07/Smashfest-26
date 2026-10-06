@@ -3,7 +3,7 @@ import {
   Trophy, Users, CalendarDays, LayoutDashboard, SettingsIcon, 
   CheckCircle2, X, Plus, Edit2, Shield,
   Swords, Activity, Trash2, RotateCcw, AlertTriangle, ArrowRight,
-  UploadCloud, Medal, History, Check, Save, Zap, Lock, Unlock, User, Wifi, WifiOff
+  Medal, History, Check, Save, Zap, Lock, Unlock, User, Wifi, WifiOff
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
@@ -14,8 +14,8 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'smashfest-local-depl
 const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// Failsafe key to bypass any corrupted local cache completely
-const LOCAL_STORAGE_KEY = 'smashfest_state_v26_failsafe'; 
+// New local storage key to clear browser cache safely without touching cloud data
+const LOCAL_STORAGE_KEY = 'smashfest_state_v30_stable'; 
 
 let firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -36,8 +36,8 @@ const app = SYNC_ENABLED ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 
-// Fresh path so no legacy data breaks the app
-const stateDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'smashfest_final_v7', 'state');
+// PERFECTLY CONNECTED BACK TO YOUR ORIGINAL LIVE DATABASE TO SAVE YOUR SINGLES DATA
+const stateDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'live_tournament', 'state');
 
 const stableStringify = (v) => JSON.stringify(v, (k, val) =>
   val && typeof val === 'object' && !Array.isArray(val)
@@ -49,7 +49,7 @@ const DEFAULT_SETTINGS = {
   pointsWin: 2, pointsLoss: 0, bestOf: 3, pointsPerGame: 11, tables: 2,
 };
 
-// --- DOUBLES DATA (12-TEAM EXACT SPREADSHEET FORMAT) ---
+// --- DOUBLES DATA (12-TEAM SPREADSHEET FORMAT) ---
 const INITIAL_TEAMS = [
   { id: 't1', code: '1', player1: 'Omm Prakash Lenka', player2: 'Shivam Singh', seed: 1 },
   { id: 't2', code: '2', player1: 'Himanshu Deb', player2: 'Ansh Pratap Ra', seed: 2 },
@@ -73,15 +73,22 @@ const INITIAL_MATCHES = [
   D_MATCH_TEMPLATE('M01', 't1', 't8', 'M01 (06 Oct)'), D_MATCH_TEMPLATE('M02', 't7', 't9', 'M02 (06 Oct)'),
   D_MATCH_TEMPLATE('M03', 't2', 't11', 'M03 (07 Oct)'), D_MATCH_TEMPLATE('M04', 't4', 't10', 'M04 (07 Oct)'),
   D_MATCH_TEMPLATE('M05', 't3', 't12', 'M05 (08 Oct)'), D_MATCH_TEMPLATE('M06', 't5', 't6', 'M06 (09 Oct)'),
+  
   D_MATCH_TEMPLATE('M07', null, null, 'M07 (12 Oct)'), D_MATCH_TEMPLATE('M08', null, null, 'M08 (12 Oct)'),
   D_MATCH_TEMPLATE('M09', null, null, 'M09 (13 Oct)'),
+  
   D_MATCH_TEMPLATE('M10', null, null, 'M10 (12 Oct)'), D_MATCH_TEMPLATE('M11', null, null, 'M11 (13 Oct)'),
   D_MATCH_TEMPLATE('M12', null, null, 'M12 (13 Oct)'),
+  
   D_MATCH_TEMPLATE('M13', null, null, 'M13 (14 Oct)'), D_MATCH_TEMPLATE('M14', null, null, 'M14 (14 Oct)'),
   D_MATCH_TEMPLATE('M15', null, null, 'M15 (14 Oct)'),
+  
   D_MATCH_TEMPLATE('M16', null, null, 'M16 (14 Oct)'), D_MATCH_TEMPLATE('M17', null, null, 'M17 (14 Oct) - BYE'),
+  
   D_MATCH_TEMPLATE('M18', null, null, 'M18 (14 Oct)'), D_MATCH_TEMPLATE('M19', null, null, 'M19 (14 Oct)'),
+  
   D_MATCH_TEMPLATE('M20', null, null, 'M20 (15 Oct)'), D_MATCH_TEMPLATE('M21', null, null, 'M21 (15 Oct)'),
+  
   D_MATCH_TEMPLATE('M22', null, null, 'M22 (16 Oct) - GRAND FINAL'),
 ];
 
@@ -157,13 +164,13 @@ const INITIAL_STATE = {
 const checkGameWin = (scoreA, scoreB, pointsPerGame) => Math.max(scoreA, scoreB) >= pointsPerGame && Math.abs(scoreA - scoreB) >= 2;
 const getMatchWinner = (scores, bestOf, pointsPerGame) => {
   let gamesA = 0, gamesB = 0; const req = Math.ceil(bestOf / 2);
-  scores.forEach(s => { if(checkGameWin(s.a, s.b, pointsPerGame)) { if(s.a > s.b) gamesA++; else gamesB++; } });
+  (scores || []).forEach(s => { if(checkGameWin(s.a, s.b, pointsPerGame)) { if(s.a > s.b) gamesA++; else gamesB++; } });
   if (gamesA >= req) return 'A'; if (gamesB >= req) return 'B'; return null;
 };
 
 // --- CASCADE LOGICS ---
 const cascadeSingles = (matches, byeId) => {
-  let nm = [...matches];
+  let nm = [...(matches || [])];
   const w = (id) => nm.find(m=>m.id===id)?.winnerId || null;
   const l = (id) => { const m = nm.find(m=>m.id===id); return m && m.winnerId ? (m.winnerId === m.teamAId ? m.teamBId : m.teamAId) : null; };
   const set = (id, a, b) => { nm = nm.map(m => m.id === id ? { ...m, teamAId: a !== undefined ? a : m.teamAId, teamBId: b !== undefined ? b : m.teamBId } : m); };
@@ -186,7 +193,7 @@ const cascadeSingles = (matches, byeId) => {
 };
 
 const cascadeDoubles = (matches) => {
-  let nm = [...matches];
+  let nm = [...(matches || [])];
   const w = (id) => nm.find(m=>m.id===id)?.winnerId || null;
   const l = (id) => { const m = nm.find(m=>m.id===id); return m && m.winnerId ? (m.winnerId === m.teamAId ? m.teamBId : m.teamAId) : null; };
   const set = (id, a, b) => { nm = nm.map(m => m.id === id ? { ...m, teamAId: a !== undefined ? a : m.teamAId, teamBId: b !== undefined ? b : m.teamBId } : m); };
@@ -206,23 +213,33 @@ const cascadeDoubles = (matches) => {
   set('M16', w('M13'), w('M14'));
   set('M17', w('M15'), null);
   set('M18', w('M16'), w('M17') || w('M15'));
-  set('M19', undefined, w('M18'));
+  set('M19', null, w('M18')); // Upper Bracket Finalist vs M18 Winner
+  
   set('M22', w('M20'), w('M21')); 
   return nm;
 };
 
 const tournamentReducer = (state, action) => {
   switch (action.type) {
-    case 'LOAD': 
-      // Failsafe merge: If any list is missing from a corrupted cloud backup, fallback to INITIAL_STATE safely
+    case 'LOAD': {
+      // SMART MIGRATION: Keeps your Singles data 100% untouched, but gracefully overwrites the old Doubles format
+      const incoming = action.payload || {};
+      const mergedSinglesMatches = incoming.singlesMatches || state.singlesMatches || INITIAL_SINGLES_MATCHES;
+      
+      let mergedMatches = incoming.matches || INITIAL_MATCHES;
+      const isOldFormat = mergedMatches.some(m => m.id === 'ko_qf1' || m.id === 'm1');
+      if (isOldFormat) mergedMatches = INITIAL_MATCHES; // Forces update to new M01-M22 format cleanly
+
       return { 
         ...INITIAL_STATE, 
-        ...action.payload,
-        teams: action.payload.teams || INITIAL_TEAMS,
-        matches: action.payload.matches || INITIAL_MATCHES,
-        singlesTeams: action.payload.singlesTeams || INITIAL_SINGLES_PLAYERS,
-        singlesMatches: action.payload.singlesMatches || INITIAL_SINGLES_MATCHES
+        ...incoming,
+        settings: incoming.settings || DEFAULT_SETTINGS,
+        teams: incoming.teams || INITIAL_TEAMS,
+        matches: mergedMatches,
+        singlesTeams: incoming.singlesTeams || INITIAL_SINGLES_PLAYERS,
+        singlesMatches: mergedSinglesMatches
       };
+    }
     case 'UPDATE_MATCH': {
       let newM = (state.matches || []).map(m => m.id === action.payload.id ? { ...m, ...action.payload.updates } : m);
       newM = cascadeDoubles(newM);
@@ -456,12 +473,12 @@ const SinglesBracket = ({ onNavigate }) => {
         <div className="space-y-3">
           <div className={`flex justify-between items-center ${match.winnerId === match.teamAId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>
             <span className="text-sm truncate pr-2">{tA?.player1 || 'TBD'} <span className="text-[10px] opacity-40 ml-1">({tA?.code||'-'})</span></span>
-            {match.status === 'completed' && match.teamAId && <span className="text-sm font-bold">{match.scores.filter(s=>s.a>s.b).length}</span>}
+            {match.status === 'completed' && match.teamAId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s.a>s.b).length}</span>}
           </div>
           <div className="h-px bg-slate-800/50"></div>
           <div className={`flex justify-between items-center ${match.winnerId === match.teamBId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>
             <span className="text-sm truncate pr-2">{tB?.player1 || 'TBD'} <span className="text-[10px] opacity-40 ml-1">({tB?.code||'-'})</span></span>
-            {match.status === 'completed' && match.teamBId && <span className="text-sm font-bold">{match.scores.filter(s=>s.b>s.a).length}</span>}
+            {match.status === 'completed' && match.teamBId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s.b>s.a).length}</span>}
           </div>
         </div>
         {isAdmin && match.status !== 'completed' && match.teamAId && match.teamBId && (
@@ -630,12 +647,12 @@ const DoublesBracket = ({ onNavigate }) => {
         <div className="space-y-3">
           <div className={`flex justify-between items-center ${match.winnerId === match.teamAId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>
             <span className="text-sm truncate pr-2">{tA ? `${tA.player1} & ${tA.player2}` : 'TBD'} <span className="text-[10px] opacity-40 ml-1">({tA?.code||'-'})</span></span>
-            {match.status === 'completed' && match.teamAId && <span className="text-sm font-bold">{match.scores.filter(s=>s.a>s.b).length}</span>}
+            {match.status === 'completed' && match.teamAId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s.a>s.b).length}</span>}
           </div>
           <div className="h-px bg-slate-800/50"></div>
           <div className={`flex justify-between items-center ${match.winnerId === match.teamBId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>
             <span className="text-sm truncate pr-2">{tB ? `${tB.player1} & ${tB.player2}` : 'TBD'} <span className="text-[10px] opacity-40 ml-1">({tB?.code||'-'})</span></span>
-            {match.status === 'completed' && match.teamBId && <span className="text-sm font-bold">{match.scores.filter(s=>s.b>s.a).length}</span>}
+            {match.status === 'completed' && match.teamBId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s.b>s.a).length}</span>}
           </div>
         </div>
         {isAdmin && match.status !== 'completed' && match.teamAId && match.teamBId && (
@@ -842,11 +859,11 @@ const Dashboard = ({ mode }) => {
   const completed = m.filter(x => x.status === 'completed').length;
   const live = m.filter(x => x.status === 'live');
   
-  const todaysMatches = m.filter(match => match && match.title && match.title.includes('06 Oct') && match.status !== 'live');
+  const todaysMatches = m.filter(match => match && match.title && (match.title.includes('6 Oct') || match.title.includes('06 Oct')) && match.status !== 'live');
   
   return (
     <div className="space-y-6 animate-in fade-in">
-      <header className="mb-8"><h1 className="text-3xl font-black text-white tracking-tight uppercase">{state.settings.tournamentName}</h1><p className="text-slate-500 mt-1">Overview • {isSingles ? 'Singles VCT' : 'Doubles VCT'}</p></header>
+      <header className="mb-8"><h1 className="text-3xl font-black text-white tracking-tight uppercase">{state.settings?.tournamentName || "SMASHFEST '26"}</h1><p className="text-slate-500 mt-1">Overview • {isSingles ? 'Singles VCT' : 'Doubles VCT'}</p></header>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="flex flex-col items-center text-center p-4"><Users className="text-blue-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{teamsList.length}</span><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">{isSingles ? 'Players' : 'Teams'}</span></Card>
         <Card className="flex flex-col items-center text-center p-4"><CalendarDays className="text-purple-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{total}</span><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">Total Matches</span></Card>
@@ -865,8 +882,8 @@ const Dashboard = ({ mode }) => {
                   const tA = isSingles ? (state.singlesTeams || []).find(t=>t.id===match.teamAId) : (state.teams || []).find(t=>t.id===match.teamAId);
                   const tB = isSingles ? (state.singlesTeams || []).find(t=>t.id===match.teamBId) : (state.teams || []).find(t=>t.id===match.teamBId);
                   let currentGameScore = match.liveGame || {a:0, b:0};
-                  let setsA = (match.scores || []).filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.a > s.b).length;
-                  let setsB = (match.scores || []).filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.b > s.a).length;
+                  let setsA = (match.scores || []).filter(s => checkGameWin(s.a, s.b, state.settings?.pointsPerGame || 11) && s.a > s.b).length;
+                  let setsB = (match.scores || []).filter(s => checkGameWin(s.a, s.b, state.settings?.pointsPerGame || 11) && s.b > s.a).length;
                   
                   return (
                      <Card key={match?.id || Math.random()} className="border-red-500/50 bg-gradient-to-br from-[#1a0505] to-[#0a0000] shadow-[0_0_20px_rgba(239,68,68,0.15)]">
@@ -1036,6 +1053,46 @@ const Settings = () => {
     </div>
   );
 }
+
+const HallOfFame = () => {
+  const { dbUser } = useContext(TournamentContext);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!SYNC_ENABLED || !dbUser) { setLoading(false); return; }
+    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'past_tournaments'));
+    const unsub = onSnapshot(q, (s) => { setHistory(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt)); setLoading(false); }, () => setLoading(false));
+    return unsub;
+  }, [dbUser]);
+
+  return (
+    <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in">
+      <header className="mb-8 text-center flex flex-col items-center"><Medal className="text-yellow-500 mb-4" size={48} /><h2 className="text-3xl font-black text-white uppercase">Hall of Fame</h2></header>
+      {loading ? <div className="text-center text-slate-600 font-mono tracking-widest text-xs py-12 animate-pulse">LOADING LEGENDS...</div> : history.length === 0 ? <Card className="text-center py-12 text-slate-600 font-mono tracking-widest text-xs uppercase border-dashed border-slate-800">No tournaments published yet.</Card> : (
+        <div className="grid gap-6">
+          {history.map(t => (
+             <div key={t.id} className="bg-gradient-to-r from-[#0a0a0a] to-[#050505] border border-slate-800 rounded-2xl p-6 shadow-xl flex justify-between items-center">
+               <div><div className="text-emerald-500 font-bold text-[10px] tracking-widest uppercase">{new Date(t.date).toLocaleDateString()}</div><h3 className="text-2xl font-black text-white uppercase">{t.tournamentName}</h3></div>
+               <div className="text-right"><div className="text-yellow-400 font-bold text-lg flex items-center justify-end gap-2"><Trophy size={16} /> {t.winner.code}</div><div className="text-slate-400 text-sm">{t.winner.p1} & {t.winner.p2}</div></div>
+             </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SyncBadge = () => {
+  const { syncStatus, isAdmin } = useContext(TournamentContext);
+  const map = {
+    live: { icon: Wifi, text: isAdmin ? 'Broadcasting live' : 'Live', cls: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' },
+    connecting: { icon: Wifi, text: 'Connecting...', cls: 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10 animate-pulse' },
+    error: { icon: WifiOff, text: 'Sync error', cls: 'text-red-400 border-red-500/30 bg-red-500/10' },
+    off: { icon: WifiOff, text: 'Offline mode', cls: 'text-slate-400 border-slate-700 bg-slate-800/50' },
+  }[syncStatus];
+  const Icon = map.icon;
+  return <div className={`fixed top-3 right-3 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest backdrop-blur ${map.cls}`}><Icon size={12}/>{map.text}</div>;
+};
 
 const AppLayout = () => {
   const { isAdmin, setIsAdmin, isSuperAdmin, setIsSuperAdmin } = useContext(TournamentContext);
