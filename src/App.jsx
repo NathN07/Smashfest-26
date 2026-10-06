@@ -14,8 +14,8 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'smashfest-local-depl
 const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// Storage key updated to ensure fresh load with new structure
-const LOCAL_STORAGE_KEY = 'smashfest_state_v10_unified'; 
+// Storage key updated to refresh safely with new UI and live metrics
+const LOCAL_STORAGE_KEY = 'smashfest_state_v12_unified_live'; 
 
 let firebaseConfig = {
   apiKey: "YOUR_API_KEY",
@@ -610,8 +610,61 @@ const Dashboard = ({ mode }) => {
         <Card className="flex flex-col items-center text-center p-4"><Users className="text-blue-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{isSingles ? state.singlesTeams.length : state.teams.length}</span><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">{isSingles ? 'Players' : 'Teams'}</span></Card>
         <Card className="flex flex-col items-center text-center p-4"><CalendarDays className="text-purple-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{total}</span><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">Total Matches</span></Card>
         <Card className="flex flex-col items-center text-center p-4 border-emerald-500/20 bg-emerald-500/5"><CheckCircle2 className="text-emerald-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{completed}</span><span className="text-[10px] text-emerald-500/70 uppercase tracking-widest font-bold mt-1">Completed</span></Card>
-        <Card className="flex flex-col items-center text-center p-4 border-yellow-500/20 bg-yellow-500/5"><Activity className="text-yellow-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{live.length}</span><span className="text-[10px] text-yellow-500/70 uppercase tracking-widest font-bold mt-1">Live Now</span></Card>
+        <Card className="flex flex-col items-center text-center p-4 border-yellow-500/20 bg-yellow-500/5">
+           <Activity className={`text-yellow-500 mb-3 ${live.length > 0 ? 'animate-pulse drop-shadow-[0_0_10px_rgba(234,179,8,0.8)]' : ''}`} size={24} />
+           <span className="text-3xl font-black text-white">{live.length}</span><span className="text-[10px] text-yellow-500/70 uppercase tracking-widest font-bold mt-1">Live Now</span>
+        </Card>
       </div>
+      
+      {/* Live Activity Feed */}
+      {live.length > 0 && (
+         <div className="mt-8 animate-in fade-in slide-in-from-bottom-4">
+            <h3 className="text-sm font-bold text-yellow-500 uppercase tracking-widest mb-4 flex items-center gap-2"><Activity size={16}/> Active Match Status</h3>
+            <div className="grid md:grid-cols-2 gap-4">
+               {live.map(match => {
+                  const tA = isSingles ? state.singlesTeams.find(t=>t.id===match.teamAId) : state.teams.find(t=>t.id===match.teamAId);
+                  const tB = isSingles ? state.singlesTeams.find(t=>t.id===match.teamBId) : state.teams.find(t=>t.id===match.teamBId);
+                  
+                  let currentGameScore = match.scores.length > 0 ? match.scores[match.scores.length - 1] : {a:0, b:0};
+                  let setsA = match.scores.filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.a > s.b).length;
+                  let setsB = match.scores.filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.b > s.a).length;
+                  
+                  // Simple check if the current active game is not yet 'won' visually (if it's missing from sets due to not hitting next game, it shows here)
+                  // For a pure spectator view, we just show the array.
+                  return (
+                     <Card key={match.id} className="border-yellow-500/30 bg-gradient-to-br from-[#0a0a0a] to-[#0d0d00]">
+                        <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-800/80">
+                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{isSingles ? match.title : match.table}</span>
+                           <span className="text-[9px] font-bold px-2 py-1 rounded bg-red-500/10 text-red-500 uppercase tracking-widest animate-pulse">LIVE</span>
+                        </div>
+                        <div className="space-y-4">
+                           <div className="flex justify-between items-center">
+                              <div className="flex gap-3 items-center">
+                                 <span className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-black text-slate-400">{tA?.code}</span>
+                                 <div><div className="text-sm font-bold text-white">{tA?.player1}</div>{!isSingles && <div className="text-xs text-slate-500">{tA?.player2}</div>}</div>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                 <div className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded">S: {setsA}</div>
+                                 <div className="text-3xl font-black text-white w-12 text-right">{currentGameScore?.a || 0}</div>
+                              </div>
+                           </div>
+                           <div className="flex justify-between items-center">
+                              <div className="flex gap-3 items-center">
+                                 <span className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-black text-slate-400">{tB?.code}</span>
+                                 <div><div className="text-sm font-bold text-white">{tB?.player1}</div>{!isSingles && <div className="text-xs text-slate-500">{tB?.player2}</div>}</div>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                 <div className="text-xs font-bold text-blue-500 bg-blue-500/10 px-2 py-1 rounded">S: {setsB}</div>
+                                 <div className="text-3xl font-black text-white w-12 text-right">{currentGameScore?.b || 0}</div>
+                              </div>
+                           </div>
+                        </div>
+                     </Card>
+                  )
+               })}
+            </div>
+         </div>
+      )}
     </div>
   );
 };
@@ -887,7 +940,7 @@ const AppLayout = () => {
       <aside className="hidden md:flex flex-col w-64 border-r border-slate-800/80 bg-[#020202]">
         <div className="p-6 pb-2"><div className="flex items-center gap-3 text-white font-black text-xl tracking-tighter"><Shield className="text-red-600" size={24}/>SMASHFEST <span className="text-red-600">'26</span></div></div>
         
-        {/* The Toggle Switch from User Screenshot */}
+        {/* The Toggle Switch exactly like User Screenshot */}
         <div className="px-6 mb-8 mt-4">
           <div className="flex items-center bg-[#0a0a0a] rounded-lg p-1 border border-slate-800 shadow-inner">
             <button
@@ -923,7 +976,6 @@ const AppLayout = () => {
       
       <main className="flex-1 overflow-y-auto overflow-x-hidden pb-24 md:pb-0 relative">
         <div className="max-w-7xl mx-auto p-4 md:p-8 pt-8 md:pt-12">
-          {/* Universal Dashboard adapts to mode */}
           {activeTab === 'dashboard' && <Dashboard mode={mode} />}
           
           {/* Singles Pages */}
