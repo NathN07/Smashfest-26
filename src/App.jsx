@@ -196,6 +196,12 @@ const tournamentReducer = (state, action) => {
     case 'DELETE_TEAM':
       return { ...state, teams: state.teams.filter(t => t.id !== action.payload) };
       
+    case 'RESET_MATCH':
+      return { ...state, matches: state.matches.map(m => m.id === action.payload ? { ...m, status: 'upcoming', scores: [], winnerId: null } : m) };
+      
+    case 'DELETE_MATCH':
+      return { ...state, matches: state.matches.filter(m => m.id !== action.payload) };
+      
     case 'UPDATE_MATCH': {
       const { id, updates } = action.payload;
       let newMatches = state.matches.map(m => m.id === id ? { ...m, ...updates } : m);
@@ -248,6 +254,7 @@ const TournamentProvider = ({ children }) => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [dbUser, setDbUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -272,7 +279,7 @@ const TournamentProvider = ({ children }) => {
   if (!isLoaded) return <div className="h-screen bg-slate-950 text-slate-400 flex items-center justify-center">Loading...</div>;
 
   return (
-    <TournamentContext.Provider value={{ state, dispatch, dbUser, isAdmin, setIsAdmin }}>
+    <TournamentContext.Provider value={{ state, dispatch, dbUser, isAdmin, setIsAdmin, isSuperAdmin, setIsSuperAdmin }}>
       {children}
     </TournamentContext.Provider>
   );
@@ -368,8 +375,10 @@ const Dashboard = ({ onNavigate }) => {
 };
 
 const Fixtures = ({ onNavigate }) => {
-  const { state, dispatch, isAdmin } = useContext(TournamentContext);
+  const { state, dispatch, isAdmin, isSuperAdmin } = useContext(TournamentContext);
   const [tab, setTab] = useState('ALL');
+  const [editingMatch, setEditingMatch] = useState(null);
+  const dialog = useDialog();
 
   const filteredMatches = state.matches.filter(m => {
     if (m.groupId === 'KO') return false; 
@@ -418,9 +427,21 @@ const Fixtures = ({ onNavigate }) => {
                         <span className="font-mono bg-slate-800 px-2 py-0.5 rounded text-white">{m.table}</span>
                         <span>{m.date} | {m.time}</span>
                       </div>
-                      <span className={`text-[9px] font-bold px-2 py-1 rounded uppercase tracking-wider ${m.status==='completed'?'bg-emerald-500/10 text-emerald-400':m.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800 text-slate-400'}`}>
-                        {m.status}
-                      </span>
+                      
+                      <div className="flex items-center gap-2">
+                        {isSuperAdmin && (
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                            {m.status !== 'upcoming' && (
+                               <button onClick={(e) => { e.stopPropagation(); dialog.confirm("Reset Match?", "Clear scores and winner?", () => dispatch({type: 'RESET_MATCH', payload: m.id}), true) }} className="p-1 bg-red-900/40 hover:bg-red-900/60 text-red-400 rounded" title="Reset Score"><RotateCcw size={14}/></button>
+                            )}
+                            <button onClick={(e) => { e.stopPropagation(); setEditingMatch(m); }} className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded" title="Edit Match"><Edit2 size={14}/></button>
+                            <button onClick={(e) => { e.stopPropagation(); dialog.confirm("Delete Match?", "Are you sure?", () => dispatch({type: 'DELETE_MATCH', payload: m.id}), true) }} className="p-1 bg-red-900/40 hover:bg-red-900/60 text-red-400 rounded" title="Delete Match"><Trash2 size={14}/></button>
+                          </div>
+                        )}
+                        <span className={`text-[9px] font-bold px-2 py-1 rounded uppercase tracking-wider ${m.status==='completed'?'bg-emerald-500/10 text-emerald-400':m.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800 text-slate-400'}`}>
+                          {m.status}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="space-y-3">
@@ -455,12 +476,67 @@ const Fixtures = ({ onNavigate }) => {
           </div>
         ))}
       </div>
+
+      <Modal isOpen={!!editingMatch} onClose={() => setEditingMatch(null)} title="Edit Match Fixture">
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          dispatch({
+            type: 'UPDATE_MATCH',
+            payload: {
+              id: editingMatch.id,
+              updates: {
+                teamAId: fd.get('teamA'),
+                teamBId: fd.get('teamB'),
+                table: fd.get('table'),
+                date: fd.get('date'),
+                time: fd.get('time')
+              }
+            }
+          });
+          setEditingMatch(null);
+          dialog.alert("Success", "Match updated successfully!");
+        }} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1">Team 1</label>
+              <select name="teamA" defaultValue={editingMatch?.teamAId} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white">
+                <option value="">Select Team...</option>
+                {state.teams.map(t => <option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1">Team 2</label>
+              <select name="teamB" defaultValue={editingMatch?.teamBId} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white">
+                <option value="">Select Team...</option>
+                {state.teams.map(t => <option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1">Table</label>
+              <input name="table" defaultValue={editingMatch?.table} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1">Date</label>
+              <input name="date" type="text" defaultValue={editingMatch?.date} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1">Time</label>
+              <input name="time" type="time" defaultValue={editingMatch?.time} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white" />
+            </div>
+          </div>
+          <Button type="submit" className="w-full mt-4">Save Match Changes</Button>
+        </form>
+      </Modal>
+
     </div>
   );
 };
 
 const KnockoutBracket = ({ onNavigate }) => {
-  const { state, dispatch, dbUser, isAdmin } = useContext(TournamentContext);
+  const { state, dispatch, dbUser, isAdmin, isSuperAdmin } = useContext(TournamentContext);
   const dialog = useDialog();
   
   const handleQualify = () => {
@@ -506,9 +582,16 @@ const KnockoutBracket = ({ onNavigate }) => {
         
         <div className="flex justify-between items-center mb-3">
           <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{title}</div>
-          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':match.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800 text-slate-400'}`}>
-            {match.status}
-          </span>
+          <div className="flex items-center gap-2 relative">
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':match.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800 text-slate-400'}`}>
+              {match.status}
+            </span>
+            {isSuperAdmin && match.status !== 'upcoming' && (
+              <button onClick={(e) => { e.stopPropagation(); dialog.confirm("Reset Match?", "Clear scores?", () => dispatch({type: 'RESET_MATCH', payload: match.id}), true) }} className="absolute -top-2 -right-8 p-1 bg-red-900/40 text-red-400 hover:bg-red-900/60 rounded opacity-0 group-hover:opacity-100 transition-opacity" title="Reset Score">
+                <RotateCcw size={14}/>
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="space-y-3">
@@ -619,16 +702,23 @@ const StandingsTable = ({ group, title }) => {
 };
 
 const Settings = () => {
-  const { state, dispatch } = useContext(TournamentContext);
+  const { state, dispatch, isSuperAdmin } = useContext(TournamentContext);
   const dialog = useDialog();
   return (
     <div className="max-w-2xl">
       <h2 className="text-2xl font-bold text-white mb-6">Tournament Settings</h2>
-      <Card className="mt-8 border-red-500/20 bg-red-500/5">
-        <h3 className="text-red-500 font-bold flex items-center gap-2 mb-4"><AlertTriangle size={18}/> Hard Reset</h3>
-        <p className="text-slate-400 text-sm mb-4">Erases all current scores and progress, reverting to the original scheduled fixtures.</p>
-        <Button onClick={() => dialog.confirm("Reset Tournament?", "Are you sure?", () => { dispatch({ type: 'RESET_ALL' }); }, true)} variant="danger">Reset Matches</Button>
-      </Card>
+      {isSuperAdmin ? (
+        <Card className="mt-8 border-red-500/20 bg-red-500/5">
+          <h3 className="text-red-500 font-bold flex items-center gap-2 mb-4"><AlertTriangle size={18}/> Hard Reset</h3>
+          <p className="text-slate-400 text-sm mb-4">Erases all current scores and progress, reverting to the original scheduled fixtures.</p>
+          <Button onClick={() => dialog.confirm("Reset Tournament?", "Are you sure?", () => { dispatch({ type: 'RESET_ALL' }); }, true)} variant="danger">Reset Matches</Button>
+        </Card>
+      ) : (
+        <Card className="mt-8 border-slate-700/50 bg-slate-900">
+          <h3 className="text-slate-400 font-bold flex items-center gap-2 mb-4"><Shield size={18}/> Access Restricted</h3>
+          <p className="text-slate-500 text-sm">Only Super Administrators can perform a Hard Reset of the tournament.</p>
+        </Card>
+      )}
     </div>
   );
 };
@@ -732,7 +822,7 @@ const LiveScoring = ({ matchId, onBack }) => {
 };
 
 const AppLayout = () => {
-  const { isAdmin, setIsAdmin } = useContext(TournamentContext);
+  const { isAdmin, setIsAdmin, isSuperAdmin, setIsSuperAdmin } = useContext(TournamentContext);
   const [activeTab, setActiveTab] = useState('fixtures');
   const [activeMatchId, setActiveMatchId] = useState(null); 
   const [showLogin, setShowLogin] = useState(false);
@@ -750,8 +840,15 @@ const AppLayout = () => {
 
   const handleLogin = (e) => {
     e.preventDefault();
-    if (password === 'SmashFest') {
+    if (password === 'SmashFestIOISuper') {
       setIsAdmin(true);
+      setIsSuperAdmin(true);
+      setShowLogin(false);
+      setPassword('');
+      dialog.alert('Success', 'Super Administrator access unlocked.');
+    } else if (password === 'SmashFest') {
+      setIsAdmin(true);
+      setIsSuperAdmin(false);
       setShowLogin(false);
       setPassword('');
       dialog.alert('Success', 'Administrator access unlocked.');
@@ -769,7 +866,7 @@ const AppLayout = () => {
         
         <div className="p-4 border-t border-slate-800">
           {isAdmin ? (
-            <button onClick={() => { setIsAdmin(false); handleNav('dashboard'); }} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"><Unlock size={18}/> Logout Admin</button>
+            <button onClick={() => { setIsAdmin(false); setIsSuperAdmin(false); handleNav('dashboard'); }} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"><Unlock size={18}/> Logout {isSuperAdmin ? 'SuperAdmin' : 'Admin'}</button>
           ) : (
             <button onClick={() => setShowLogin(true)} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all"><Lock size={18}/> Admin Login</button>
           )}
@@ -788,9 +885,9 @@ const AppLayout = () => {
       </main>
       <div className="md:hidden fixed bottom-0 w-full bg-slate-950 border-t border-slate-800 flex justify-around p-2 pb-safe z-50 overflow-x-auto">
         {navs.map(n => <button key={n.id} onClick={()=>handleNav(n.id)} className={`flex-shrink-0 flex flex-col items-center p-2 rounded-lg min-w-[64px] ${activeTab===n.id?'text-emerald-400':'text-slate-500'}`}><n.i size={20}/><span className="text-[10px] mt-1">{n.l}</span></button>)}
-        <button onClick={() => isAdmin ? setIsAdmin(false) : setShowLogin(true)} className={`flex-shrink-0 flex flex-col items-center p-2 rounded-lg min-w-[64px] ${isAdmin ? 'text-red-400' : 'text-slate-500'}`}>
+        <button onClick={() => isAdmin ? (setIsAdmin(false), setIsSuperAdmin(false)) : setShowLogin(true)} className={`flex-shrink-0 flex flex-col items-center p-2 rounded-lg min-w-[64px] ${isAdmin ? 'text-red-400' : 'text-slate-500'}`}>
           {isAdmin ? <Unlock size={20}/> : <Lock size={20}/>}
-          <span className="text-[10px] mt-1">{isAdmin ? 'Logout' : 'Admin'}</span>
+          <span className="text-[10px] mt-1">Logout</span>
         </button>
       </div>
       
@@ -799,7 +896,7 @@ const AppLayout = () => {
           <div>
             <input 
               type="password" 
-              placeholder="Enter admin password"
+              placeholder="Enter admin or superadmin password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoFocus
