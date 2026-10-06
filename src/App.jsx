@@ -3,7 +3,7 @@ import {
   Trophy, Users, CalendarDays, LayoutDashboard, SettingsIcon, 
   Play, CheckCircle2, ChevronRight, X, Plus, Edit2, Shield,
   Swords, Activity, Trash2, RotateCcw, AlertTriangle, ArrowRight,
-  UploadCloud, Medal, History, Check, Save, Zap
+  UploadCloud, Medal, History, Check, Save, Zap, Lock, Unlock
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
@@ -247,6 +247,7 @@ const TournamentProvider = ({ children }) => {
   const [state, dispatch] = useReducer(tournamentReducer, INITIAL_STATE);
   const [isLoaded, setIsLoaded] = useState(false);
   const [dbUser, setDbUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -271,7 +272,7 @@ const TournamentProvider = ({ children }) => {
   if (!isLoaded) return <div className="h-screen bg-slate-950 text-slate-400 flex items-center justify-center">Loading...</div>;
 
   return (
-    <TournamentContext.Provider value={{ state, dispatch, dbUser }}>
+    <TournamentContext.Provider value={{ state, dispatch, dbUser, isAdmin, setIsAdmin }}>
       {children}
     </TournamentContext.Provider>
   );
@@ -367,7 +368,7 @@ const Dashboard = ({ onNavigate }) => {
 };
 
 const Fixtures = ({ onNavigate }) => {
-  const { state, dispatch } = useContext(TournamentContext);
+  const { state, dispatch, isAdmin } = useContext(TournamentContext);
   const [tab, setTab] = useState('ALL');
 
   const filteredMatches = state.matches.filter(m => {
@@ -439,7 +440,7 @@ const Fixtures = ({ onNavigate }) => {
                       </div>
                     </div>
 
-                    {m.status !== 'completed' && (
+                    {isAdmin && m.status !== 'completed' && (
                       <div className="mt-4 pt-4 border-t border-slate-800 flex gap-2">
                         <Button className="flex-1 text-xs py-1.5" variant={m.status === 'live' ? 'primary' : 'secondary'} onClick={() => {
                             if(m.status === 'upcoming') dispatch({ type: 'UPDATE_MATCH', payload: { id: m.id, updates: { status: 'live' } }});
@@ -459,7 +460,7 @@ const Fixtures = ({ onNavigate }) => {
 };
 
 const KnockoutBracket = ({ onNavigate }) => {
-  const { state, dispatch, dbUser } = useContext(TournamentContext);
+  const { state, dispatch, dbUser, isAdmin } = useContext(TournamentContext);
   const dialog = useDialog();
   
   const handleQualify = () => {
@@ -527,9 +528,9 @@ const KnockoutBracket = ({ onNavigate }) => {
           </div>
         </div>
 
-        {match.status !== 'completed' && isClickable && (
+        {isAdmin && match.status !== 'completed' && isClickable && (
           <div className="mt-4 pt-3 border-t border-slate-800 flex gap-2">
-            <Button className="flex-1 text-[10px] py-1" variant={match.status === 'live' ? 'primary' : 'secondary'} onClick={() => {
+            <Button className="flex-1 text-[10px] py-1" variant={match.status === 'primary' ? 'primary' : 'secondary'} onClick={() => {
                 if(match.status === 'upcoming') dispatch({ type: 'UPDATE_MATCH', payload: { id: match.id, updates: { status: 'live' } }});
                 onNavigate('live', match.id);
               }}>{match.status === 'live' ? 'Resume Scoring' : 'Live Score'}</Button>
@@ -543,7 +544,7 @@ const KnockoutBracket = ({ onNavigate }) => {
     <div className="space-y-6">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-white">Knockout Bracket</h2>
-        <Button onClick={handleQualify} icon={Zap} variant="primary">Qualify Top 8</Button>
+        {isAdmin && <Button onClick={handleQualify} icon={Zap} variant="primary">Qualify Top 8</Button>}
       </div>
 
       <div className="overflow-x-auto pb-12">
@@ -574,7 +575,7 @@ const KnockoutBracket = ({ onNavigate }) => {
                     <div className="text-yellow-400 font-black text-xl">CHAMPIONS</div>
                     <div className="text-white font-bold">{state.teams.find(t=>t.id===finalMatch.winnerId)?.player1}</div>
                   </div>
-                  <Button onClick={() => publishToCloud(state.teams.find(t=>t.id===finalMatch.winnerId), state.teams.find(t=>t.id===(finalMatch.winnerId===finalMatch.teamAId?finalMatch.teamBId:finalMatch.teamAId)))} icon={UploadCloud} variant="primary">Publish</Button>
+                  {isAdmin && <Button onClick={() => publishToCloud(state.teams.find(t=>t.id===finalMatch.winnerId), state.teams.find(t=>t.id===(finalMatch.winnerId===finalMatch.teamAId?finalMatch.teamBId:finalMatch.teamAId)))} icon={UploadCloud} variant="primary">Publish</Button>}
                 </div>
               )}
             </div>
@@ -696,21 +697,48 @@ const LiveScoring = ({ matchId, onBack }) => {
 };
 
 const AppLayout = () => {
+  const { isAdmin, setIsAdmin } = useContext(TournamentContext);
   const [activeTab, setActiveTab] = useState('fixtures');
   const [activeMatchId, setActiveMatchId] = useState(null); 
+  const [showLogin, setShowLogin] = useState(false);
+  const [password, setPassword] = useState('');
+  const dialog = useDialog();
 
   const handleNav = (id, matchId=null) => { setActiveTab(id); if(matchId) setActiveMatchId(matchId); };
+  
   const navs = [
     { id: 'dashboard', i: LayoutDashboard, l: 'Dashboard' }, { id: 'fixtures', i: CalendarDays, l: 'Fixtures' },
     { id: 'standings', i: Trophy, l: 'Standings' }, { id: 'knockout', i: Swords, l: 'Knockout' },
-    { id: 'teams', i: Users, l: 'Teams' }, { id: 'settings', i: SettingsIcon, l: 'Settings' }
+    { id: 'teams', i: Users, l: 'Teams' }, 
+    ...(isAdmin ? [{ id: 'settings', i: SettingsIcon, l: 'Settings' }] : [])
   ];
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (password === 'SmashFest') {
+      setIsAdmin(true);
+      setShowLogin(false);
+      setPassword('');
+      dialog.alert('Success', 'Administrator access unlocked.');
+    } else {
+      dialog.alert('Error', 'Incorrect password.');
+      setPassword('');
+    }
+  };
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-300 font-sans selection:bg-emerald-500/30">
       <aside className="hidden md:flex flex-col w-64 border-r border-slate-800 bg-slate-950/50">
         <div className="p-6 flex items-center gap-3 text-emerald-500 font-black text-xl"><Shield size={28}/> SMASHFEST</div>
         <nav className="flex-1 px-4 space-y-2 mt-4">{navs.map(n => <button key={n.id} onClick={()=>handleNav(n.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab===n.id?'bg-emerald-500/10 text-emerald-400 font-bold':'hover:bg-slate-900 font-medium'}`}><n.i size={20}/>{n.l}</button>)}</nav>
+        
+        <div className="p-4 border-t border-slate-800">
+          {isAdmin ? (
+            <button onClick={() => { setIsAdmin(false); handleNav('dashboard'); }} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"><Unlock size={18}/> Logout Admin</button>
+          ) : (
+            <button onClick={() => setShowLogin(true)} className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all"><Lock size={18}/> Admin Login</button>
+          )}
+        </div>
       </aside>
       <main className="flex-1 overflow-y-auto pb-24 md:pb-0 relative">
         <div className="max-w-6xl mx-auto p-4 md:p-8">
@@ -719,13 +747,33 @@ const AppLayout = () => {
           {activeTab === 'standings' && <div className="grid lg:grid-cols-2 gap-8"><StandingsTable group="A" title="GROUP A"/><StandingsTable group="B" title="GROUP B"/></div>}
           {activeTab === 'knockout' && <KnockoutBracket onNavigate={handleNav} />}
           {activeTab === 'teams' && <Teams />}
-          {activeTab === 'settings' && <Settings />}
-          {activeTab === 'live' && <LiveScoring matchId={activeMatchId} onBack={() => handleNav('fixtures')} />}
+          {activeTab === 'settings' && isAdmin && <Settings />}
+          {activeTab === 'live' && isAdmin && <LiveScoring matchId={activeMatchId} onBack={() => handleNav('fixtures')} />}
         </div>
       </main>
       <div className="md:hidden fixed bottom-0 w-full bg-slate-950 border-t border-slate-800 flex justify-around p-2 pb-safe z-50 overflow-x-auto">
         {navs.map(n => <button key={n.id} onClick={()=>handleNav(n.id)} className={`flex-shrink-0 flex flex-col items-center p-2 rounded-lg min-w-[64px] ${activeTab===n.id?'text-emerald-400':'text-slate-500'}`}><n.i size={20}/><span className="text-[10px] mt-1">{n.l}</span></button>)}
+        <button onClick={() => isAdmin ? setIsAdmin(false) : setShowLogin(true)} className={`flex-shrink-0 flex flex-col items-center p-2 rounded-lg min-w-[64px] ${isAdmin ? 'text-red-400' : 'text-slate-500'}`}>
+          {isAdmin ? <Unlock size={20}/> : <Lock size={20}/>}
+          <span className="text-[10px] mt-1">{isAdmin ? 'Logout' : 'Admin'}</span>
+        </button>
       </div>
+      
+      <Modal isOpen={showLogin} onClose={() => setShowLogin(false)} title="Administrator Login">
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div>
+            <input 
+              type="password" 
+              placeholder="Enter admin password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoFocus
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" 
+            />
+          </div>
+          <Button type="submit" className="w-full py-3" variant="primary">Access Admin Panel</Button>
+        </form>
+      </Modal>
     </div>
   );
 };
