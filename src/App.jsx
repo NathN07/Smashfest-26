@@ -1,14 +1,14 @@
-import React, { createContext, useReducer, useContext, useEffect, useState, useMemo } from 'react';
+import React, { createContext, useReducer, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { 
   Trophy, Users, CalendarDays, LayoutDashboard, SettingsIcon, 
   CheckCircle2, X, Plus, Edit2, Shield,
   Swords, Activity, Trash2, RotateCcw, AlertTriangle, ArrowRight,
-  UploadCloud, Medal, History, Check, Save, Zap, Lock, Unlock, User
+  UploadCloud, Medal, History, Check, Save, Zap, Lock, Unlock, User, Wifi, WifiOff
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, query } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, query, doc, setDoc } from 'firebase/firestore';
 
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'smashfest-local-deploy';
 const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
@@ -18,21 +18,33 @@ const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial
 const LOCAL_STORAGE_KEY = 'smashfest_state_v12_unified_live'; 
 
 let firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 if (firebaseConfigStr) {
   try { firebaseConfig = JSON.parse(firebaseConfigStr); } catch(e) {}
 }
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Live sync only works when a real Firebase project is configured
+const SYNC_ENABLED = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
+
+const app = SYNC_ENABLED ? initializeApp(firebaseConfig) : null;
+const auth = app ? getAuth(app) : null;
+const db = app ? getFirestore(app) : null;
+
+// One shared document holds the whole live tournament; admin writes it, everyone else listens.
+const stateDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'live_tournament', 'state');
+
+// Stable stringify (sorted keys) so key order never causes false "changed" detection
+const stableStringify = (v) => JSON.stringify(v, (k, val) =>
+  val && typeof val === 'object' && !Array.isArray(val)
+    ? Object.keys(val).sort().reduce((o, key) => { o[key] = val[key]; return o; }, {})
+    : val);
 
 const INITIAL_TEAMS = [
   { id: 't1', code: 'A1', player1: 'Utpal', player2: 'Pardeep', group: 'A', seed: 1 },
@@ -284,28 +296,70 @@ const TournamentProvider = ({ children }) => {
   const [dbUser, setDbUser] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  // 'off' = no Firebase configured, 'connecting', 'live' = receiving updates, 'error'
+  const [syncStatus, setSyncStatus] = useState(SYNC_ENABLED ? 'connecting' : 'off');
+  const [remoteReady, setRemoteReady] = useState(!SYNC_ENABLED);
+  const lastSyncedRef = useRef(null); // stable JSON of the last state known to match the server
 
+  // 1. Load local copy first so the page paints instantly
   useEffect(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (saved) dispatch({ type: 'LOAD', payload: JSON.parse(saved) });
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (saved) dispatch({ type: 'LOAD', payload: JSON.parse(saved) });
+    } catch (e) {}
     setIsLoaded(true);
   }, []);
 
   useEffect(() => { if (isLoaded) localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state)); }, [state, isLoaded]);
 
+  // 2. Sign in anonymously (needed for Firestore rules)
   useEffect(() => {
+    if (!SYNC_ENABLED) return;
     const initAuth = async () => {
       try {
         if (initialAuthToken) setDbUser((await signInWithCustomToken(auth, initialAuthToken)).user);
         else setDbUser((await signInAnonymously(auth)).user);
-      } catch (e) {}
+      } catch (e) { setSyncStatus('error'); }
     }; initAuth();
   }, []);
+
+  // 3. Listen to the shared tournament document - this is what viewers see live
+  useEffect(() => {
+    if (!SYNC_ENABLED || !dbUser) return;
+    const unsub = onSnapshot(stateDocRef(), (snap) => {
+      setSyncStatus('live');
+      setRemoteReady(true);
+      if (!snap.exists()) return; // nothing published yet; admin's first change will create it
+      if (snap.metadata.hasPendingWrites) return; // our own write echoing back
+      const remote = snap.data().state;
+      if (!remote) return;
+      const remoteJson = stableStringify(remote);
+      if (remoteJson === lastSyncedRef.current) return;
+      lastSyncedRef.current = remoteJson;
+      dispatch({ type: 'LOAD', payload: remote });
+    }, () => setSyncStatus('error'));
+    return unsub;
+  }, [dbUser]);
+
+  // 4. Admin pushes every change to the server (debounced). Viewers never write.
+  useEffect(() => {
+    if (!SYNC_ENABLED || !isLoaded || !remoteReady || !isAdmin || !dbUser) return;
+    const json = stableStringify(state);
+    if (json === lastSyncedRef.current) return;
+    const t = setTimeout(async () => {
+      try {
+        await setDoc(stateDocRef(), { state: JSON.parse(JSON.stringify(state)), updatedAt: Date.now() });
+        lastSyncedRef.current = json;
+        setSyncStatus('live');
+      } catch (e) { setSyncStatus('error'); }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [state, isLoaded, remoteReady, isAdmin, dbUser]);
 
   if (!isLoaded) return <div className="h-screen bg-[#050505] flex items-center justify-center text-slate-400 font-mono tracking-widest text-sm">LOADING ASSETS...</div>;
 
   return (
-    <TournamentContext.Provider value={{ state, dispatch, dbUser, isAdmin, setIsAdmin, isSuperAdmin, setIsSuperAdmin }}>
+    <TournamentContext.Provider value={{ state, dispatch, dbUser, isAdmin, setIsAdmin, isSuperAdmin, setIsSuperAdmin, syncStatus }}>
       {children}
     </TournamentContext.Provider>
   );
@@ -419,7 +473,7 @@ const SinglesBracket = ({ onNavigate }) => {
           <div className="flex items-center gap-2 relative">
              <span className={`text-[9px] font-bold px-2 py-1 rounded uppercase tracking-wider ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':match.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800/50 text-slate-500'}`}>{match.status}</span>
              {isSuperAdmin && match.status !== 'upcoming' && (
-               <button onClick={() => dialog.confirm("Reset Match?", "Clear scores?", () => dispatch({type: 'UPDATE_SINGLES_MATCH', payload: {id: match.id, updates: {status: 'upcoming', scores: [], winnerId: null}}}), true)} className="absolute -right-2 -top-2 opacity-0 group-hover:opacity-100 p-1 bg-red-900/40 text-red-400 hover:bg-red-900/60 rounded z-10"><RotateCcw size={12}/></button>
+               <button onClick={() => dialog.confirm("Reset Match?", "Clear scores?", () => dispatch({type: 'UPDATE_SINGLES_MATCH', payload: {id: match.id, updates: {status: 'upcoming', scores: [], winnerId: null, liveGame: null}}}), true)} className="absolute -right-2 -top-2 opacity-0 group-hover:opacity-100 p-1 bg-red-900/40 text-red-400 hover:bg-red-900/60 rounded z-10"><RotateCcw size={12}/></button>
              )}
           </div>
         </div>
@@ -528,16 +582,21 @@ const LiveScoring = ({ matchId, isSingles, onBack }) => {
   const teamB = isSingles ? state.singlesTeams.find(t => t.id === match?.teamBId) : state.teams.find(t => t.id === match?.teamBId);
 
   const [scores, setScores] = useState(match?.scores || []);
-  const [currentGame, setCurrentGame] = useState({ a: 0, b: 0 });
+  const [currentGame, setCurrentGame] = useState(match?.liveGame || { a: 0, b: 0 });
+  const updateType = isSingles ? 'UPDATE_SINGLES_MATCH' : 'UPDATE_MATCH';
 
   if (!match || !teamA || !teamB) return <div className="p-8 text-center text-slate-500">Match not ready.</div>;
 
-  const handleScore = (team, delta) => setCurrentGame(prev => ({ ...prev, [team]: Math.max(0, prev[team] + delta) }));
+  const handleScore = (team, delta) => {
+    const next = { ...currentGame, [team]: Math.max(0, currentGame[team] + delta) };
+    setCurrentGame(next);
+    dispatch({ type: updateType, payload: { id: match.id, updates: { liveGame: next, status: 'live' } } });
+  };
 
   const handleNextGame = () => {
     const newScores = [...scores, currentGame];
     setScores(newScores); setCurrentGame({ a: 0, b: 0 });
-    dispatch({ type: isSingles ? 'UPDATE_SINGLES_MATCH' : 'UPDATE_MATCH', payload: { id: match.id, updates: { scores: newScores } } });
+    dispatch({ type: updateType, payload: { id: match.id, updates: { scores: newScores, liveGame: { a: 0, b: 0 } } } });
   };
 
   const handleFinishMatch = () => {
@@ -552,7 +611,7 @@ const LiveScoring = ({ matchId, isSingles, onBack }) => {
       if(sa>sb) winnerId = teamA.id; else if (sb>sa) winnerId = teamB.id; else if(pa>pb) winnerId = teamA.id; else winnerId = teamB.id;
     }
 
-    dispatch({ type: isSingles ? 'UPDATE_SINGLES_MATCH' : 'UPDATE_MATCH', payload: { id: match.id, updates: { scores: finalScores, status: 'completed', winnerId } } });
+    dispatch({ type: isSingles ? 'UPDATE_SINGLES_MATCH' : 'UPDATE_MATCH', payload: { id: match.id, updates: { scores: finalScores, status: 'completed', winnerId, liveGame: null } } });
     onBack();
   };
 
@@ -625,7 +684,7 @@ const Dashboard = ({ mode }) => {
                   const tA = isSingles ? state.singlesTeams.find(t=>t.id===match.teamAId) : state.teams.find(t=>t.id===match.teamAId);
                   const tB = isSingles ? state.singlesTeams.find(t=>t.id===match.teamBId) : state.teams.find(t=>t.id===match.teamBId);
                   
-                  let currentGameScore = match.scores.length > 0 ? match.scores[match.scores.length - 1] : {a:0, b:0};
+                  let currentGameScore = match.liveGame || {a:0, b:0};
                   let setsA = match.scores.filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.a > s.b).length;
                   let setsB = match.scores.filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.b > s.a).length;
                   
@@ -736,12 +795,12 @@ const Fixtures = ({ onNavigate }) => {
                       <div className="flex gap-2 items-center text-[10px] text-slate-500 font-bold uppercase tracking-widest"><span className="bg-slate-800/50 px-2 py-0.5 rounded">{m.table}</span><span>{m.date ? `${m.date} | ` : ''}{m.time}</span></div>
                       <div className="flex gap-2 relative">
                         <span className={`text-[9px] font-bold px-2 py-1 rounded uppercase tracking-wider ${m.status==='completed'?'bg-emerald-500/10 text-emerald-400':m.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800/50 text-slate-500'}`}>{m.status}</span>
-                        {isSuperAdmin && m.status !== 'upcoming' && (<button onClick={() => dialog.confirm("Reset?", "Clear scores?", () => dispatch({type: 'UPDATE_MATCH', payload: {id: m.id, updates: {status: 'upcoming', scores: [], winnerId: null}}}), true)} className="absolute -right-2 -top-2 opacity-0 group-hover:opacity-100 p-1 bg-red-900/40 text-red-400 hover:bg-red-900/60 rounded z-10"><RotateCcw size={12}/></button>)}
+                        {isSuperAdmin && m.status !== 'upcoming' && (<button onClick={() => dialog.confirm("Reset?", "Clear scores?", () => dispatch({type: 'UPDATE_MATCH', payload: {id: m.id, updates: {status: 'upcoming', scores: [], winnerId: null, liveGame: null}}}), true)} className="absolute -right-2 -top-2 opacity-0 group-hover:opacity-100 p-1 bg-red-900/40 text-red-400 hover:bg-red-900/60 rounded z-10"><RotateCcw size={12}/></button>)}
                       </div>
                     </div>
                     <div className="space-y-3">
-                      <div className={`flex justify-between items-center ${m.winnerId === teamA?.id ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}><div className="flex gap-2 items-center"><span className="w-6 text-xs opacity-40 font-mono">{teamA?.code}</span><span className="text-sm truncate max-w-[120px]">{teamA?.player1}</span></div>{m.status === 'completed' && (<span className="text-lg font-black">{m.scores.filter(s=>s.a>s.b).length}</span>)}</div>
-                      <div className={`flex justify-between items-center ${m.winnerId === teamB?.id ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}><div className="flex gap-2 items-center"><span className="w-6 text-xs opacity-40 font-mono">{teamB?.code}</span><span className="text-sm truncate max-w-[120px]">{teamB?.player1}</span></div>{m.status === 'completed' && (<span className="text-lg font-black">{m.scores.filter(s=>s.b>s.a).length}</span>)}</div>
+                      <div className={`flex justify-between items-center ${m.winnerId === teamA?.id ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}><div className="flex gap-2 items-center"><span className="w-6 text-xs opacity-40 font-mono">{teamA?.code}</span><span className="text-sm truncate max-w-[120px]">{teamA?.player1}</span></div>{m.status === 'completed' && (<span className="text-lg font-black">{m.scores.filter(s=>s.a>s.b).length}</span>)}{m.status === 'live' && (<span className="text-lg font-black text-red-400">{m.scores.filter(s=>s.a>s.b).length} <span className="text-slate-500 text-sm">({m.liveGame?.a || 0})</span></span>)}</div>
+                      <div className={`flex justify-between items-center ${m.winnerId === teamB?.id ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}><div className="flex gap-2 items-center"><span className="w-6 text-xs opacity-40 font-mono">{teamB?.code}</span><span className="text-sm truncate max-w-[120px]">{teamB?.player1}</span></div>{m.status === 'completed' && (<span className="text-lg font-black">{m.scores.filter(s=>s.b>s.a).length}</span>)}{m.status === 'live' && (<span className="text-lg font-black text-red-400">{m.scores.filter(s=>s.b>s.a).length} <span className="text-slate-500 text-sm">({m.liveGame?.b || 0})</span></span>)}</div>
                     </div>
                     {isAdmin && m.status !== 'completed' && (
                       <div className="mt-4 pt-4 border-t border-slate-800/50"><Button className="w-full text-xs py-1.5 uppercase tracking-widest font-bold" variant={m.status === 'live' ? 'primary' : 'secondary'} onClick={() => { if(m.status === 'upcoming') dispatch({ type: 'UPDATE_MATCH', payload: { id: m.id, updates: { status: 'live' } }}); onNavigate('live', m.id); }}>{m.status === 'live' ? 'Resume Scoring' : 'Live Scoring'}</Button></div>
@@ -803,7 +862,7 @@ const KnockoutBracket = ({ onNavigate }) => {
              <span className={`text-[9px] font-bold px-2 py-1 rounded uppercase tracking-wider ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':match.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800/50 text-slate-500'}`}>{match.status}</span>
              {isSuperAdmin && (
                <div className="absolute -right-2 -top-2 opacity-0 group-hover:opacity-100 flex gap-1 z-10">
-                 {match.status !== 'upcoming' && <button onClick={() => dialog.confirm("Reset?", "Clear?", () => dispatch({type: 'UPDATE_MATCH', payload: {id: match.id, updates: {status: 'upcoming', scores: [], winnerId: null}}}), true)} className="p-1 bg-red-900/40 text-red-400 hover:bg-red-900/60 rounded"><RotateCcw size={12}/></button>}
+                 {match.status !== 'upcoming' && <button onClick={() => dialog.confirm("Reset?", "Clear?", () => dispatch({type: 'UPDATE_MATCH', payload: {id: match.id, updates: {status: 'upcoming', scores: [], winnerId: null, liveGame: null}}}), true)} className="p-1 bg-red-900/40 text-red-400 hover:bg-red-900/60 rounded"><RotateCcw size={12}/></button>}
                  <button onClick={() => setEditingKO(match)} className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"><Edit2 size={12}/></button>
                </div>
              )}
@@ -884,7 +943,7 @@ const HallOfFame = () => {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    if (!dbUser) return;
+    if (!SYNC_ENABLED || !dbUser) { setLoading(false); return; }
     const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'past_tournaments'));
     const unsub = onSnapshot(q, (s) => { setHistory(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt)); setLoading(false); }, () => setLoading(false));
     return unsub;
@@ -905,6 +964,18 @@ const HallOfFame = () => {
       )}
     </div>
   );
+};
+
+const SyncBadge = () => {
+  const { syncStatus, isAdmin } = useContext(TournamentContext);
+  const map = {
+    live: { icon: Wifi, text: isAdmin ? 'Broadcasting live' : 'Live', cls: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' },
+    connecting: { icon: Wifi, text: 'Connecting...', cls: 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10 animate-pulse' },
+    error: { icon: WifiOff, text: 'Sync error', cls: 'text-red-400 border-red-500/30 bg-red-500/10' },
+    off: { icon: WifiOff, text: 'Offline mode', cls: 'text-slate-400 border-slate-700 bg-slate-800/50' },
+  }[syncStatus];
+  const Icon = map.icon;
+  return <div className={`fixed top-3 right-3 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest backdrop-blur ${map.cls}`}><Icon size={12}/>{map.text}</div>;
 };
 
 const AppLayout = () => {
@@ -937,6 +1008,7 @@ const AppLayout = () => {
 
   return (
     <div className="flex h-screen bg-[#050505] text-slate-300 font-sans selection:bg-emerald-500/30">
+      <SyncBadge />
       <aside className="hidden md:flex flex-col w-64 border-r border-slate-800/80 bg-[#020202]">
         <div className="p-6 pb-2"><div className="flex items-center gap-3 text-white font-black text-xl tracking-tighter"><Shield className="text-red-600" size={24}/>SMASHFEST <span className="text-red-600">'26</span></div></div>
         
