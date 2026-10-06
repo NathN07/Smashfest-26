@@ -14,8 +14,8 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'smashfest-local-depl
 const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// New key to forcefully reload the UI without destroying backend data
-const LOCAL_STORAGE_KEY = 'smashfest_state_v35_final_rescue'; 
+// New cache key to ensure fresh local execution without hurting the cloud
+const LOCAL_STORAGE_KEY = 'smashfest_state_v40_bulletproof'; 
 
 let firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -36,7 +36,7 @@ const app = SYNC_ENABLED ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 
-// LINKED EXACTLY TO YOUR LIVE TOURNAMENT DATABASE
+// CONNECTED EXACTLY TO YOUR MAIN LIVE DATABASE (Your data is completely safe here)
 const stateDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'live_tournament', 'state');
 
 const stableStringify = (v) => JSON.stringify(v, (k, val) =>
@@ -164,16 +164,16 @@ const INITIAL_STATE = {
 const checkGameWin = (scoreA, scoreB, pointsPerGame) => Math.max(scoreA, scoreB) >= pointsPerGame && Math.abs(scoreA - scoreB) >= 2;
 const getMatchWinner = (scores, bestOf, pointsPerGame) => {
   let gamesA = 0, gamesB = 0; const req = Math.ceil(bestOf / 2);
-  (scores || []).forEach(s => { if(checkGameWin(s.a, s.b, pointsPerGame)) { if(s.a > s.b) gamesA++; else gamesB++; } });
+  (scores || []).forEach(s => { if(s && checkGameWin(s.a, s.b, pointsPerGame)) { if(s.a > s.b) gamesA++; else gamesB++; } });
   if (gamesA >= req) return 'A'; if (gamesB >= req) return 'B'; return null;
 };
 
 // --- CASCADE LOGICS ---
 const cascadeSingles = (matches, byeId) => {
   let nm = [...(matches || [])];
-  const w = (id) => nm.find(m=>m.id===id)?.winnerId || null;
-  const l = (id) => { const m = nm.find(m=>m.id===id); return m && m.winnerId ? (m.winnerId === m.teamAId ? m.teamBId : m.teamAId) : null; };
-  const set = (id, a, b) => { nm = nm.map(m => m.id === id ? { ...m, teamAId: a !== undefined ? a : m.teamAId, teamBId: b !== undefined ? b : m.teamBId } : m); };
+  const w = (id) => nm.find(m=>m && m.id===id)?.winnerId || null;
+  const l = (id) => { const m = nm.find(m=>m && m.id===id); return m && m.winnerId ? (m.winnerId === m.teamAId ? m.teamBId : m.teamAId) : null; };
+  const set = (id, a, b) => { nm = nm.map(m => m && m.id === id ? { ...m, teamAId: a !== undefined ? a : m.teamAId, teamBId: b !== undefined ? b : m.teamBId } : m); };
 
   set('W1', w('M1'), w('M2')); set('L1', l('M1'), l('M2')); set('W2', w('M3'), w('M4')); set('L2', l('M3'), l('M4'));
   set('W3', w('M5'), w('M6')); set('L3', l('M5'), l('M6')); set('W4', w('M7'), w('M8')); set('L4', l('M7'), l('M8'));
@@ -194,9 +194,9 @@ const cascadeSingles = (matches, byeId) => {
 
 const cascadeDoubles = (matches) => {
   let nm = [...(matches || [])];
-  const w = (id) => nm.find(m=>m.id===id)?.winnerId || null;
-  const l = (id) => { const m = nm.find(m=>m.id===id); return m && m.winnerId ? (m.winnerId === m.teamAId ? m.teamBId : m.teamAId) : null; };
-  const set = (id, a, b) => { nm = nm.map(m => m.id === id ? { ...m, teamAId: a !== undefined ? a : m.teamAId, teamBId: b !== undefined ? b : m.teamBId } : m); };
+  const w = (id) => nm.find(m=>m && m.id===id)?.winnerId || null;
+  const l = (id) => { const m = nm.find(m=>m && m.id===id); return m && m.winnerId ? (m.winnerId === m.teamAId ? m.teamBId : m.teamAId) : null; };
+  const set = (id, a, b) => { nm = nm.map(m => m && m.id === id ? { ...m, teamAId: a !== undefined ? a : m.teamAId, teamBId: b !== undefined ? b : m.teamBId } : m); };
 
   set('M07', w('M01'), w('M02'));
   set('M08', w('M03'), w('M04'));
@@ -224,27 +224,33 @@ const tournamentReducer = (state, action) => {
     case 'LOAD': {
       const incoming = action.payload || {};
       
-      // CRITICAL PROTECTIVE MERGE: This ensures your Singles scores from the cloud are NEVER overwritten
-      const mergedSinglesMatches = incoming.singlesMatches && incoming.singlesMatches.length > 0 ? incoming.singlesMatches : state.singlesMatches || INITIAL_SINGLES_MATCHES;
-      const mergedSinglesTeams = incoming.singlesTeams && incoming.singlesTeams.length > 0 ? incoming.singlesTeams : state.singlesTeams || INITIAL_SINGLES_PLAYERS;
+      // CRITICAL DATA PRESERVATION: This safely keeps all your original Singles matches and Teams untouched!
+      const mergedSinglesMatches = (incoming.singlesMatches && incoming.singlesMatches.length > 0) ? incoming.singlesMatches : (state.singlesMatches || INITIAL_SINGLES_MATCHES);
+      const mergedSinglesTeams = (incoming.singlesTeams && incoming.singlesTeams.length > 0) ? incoming.singlesTeams : (state.singlesTeams || INITIAL_SINGLES_PLAYERS);
       
       let mergedMatches = incoming.matches || INITIAL_MATCHES;
-      // Smart check: If cloud data has old 'm1' format instead of 'M01', upgrade it automatically for Doubles
-      const isOldFormat = mergedMatches.some(m => m.id === 'ko_qf1' || m.id === 'm1');
+      // Force an upgrade to M01-M22 format for Doubles ONLY IF it's using the old obsolete formats
+      const isOldFormat = mergedMatches.some(m => m && (m.id === 'ko_qf1' || m.id === 'm1'));
       if (isOldFormat) mergedMatches = INITIAL_MATCHES;
+
+      let mergedTeams = incoming.teams || INITIAL_TEAMS;
+      // Overwrite ONLY IF it's the old 12-team data format (Code A1) which we don't use anymore
+      if (mergedTeams.some(t => t && (t.code === 'A1' || t.group === 'A'))) {
+          mergedTeams = INITIAL_TEAMS;
+      }
 
       return { 
         ...INITIAL_STATE, 
         ...incoming,
         settings: incoming.settings || DEFAULT_SETTINGS,
-        teams: INITIAL_TEAMS, // Force updated 12 teams structure
+        teams: mergedTeams, 
         matches: mergedMatches, 
-        singlesTeams: mergedSinglesTeams, // RESTORES LIVE DATA
-        singlesMatches: mergedSinglesMatches // RESTORES LIVE SCORES
+        singlesTeams: mergedSinglesTeams, 
+        singlesMatches: mergedSinglesMatches 
       };
     }
     case 'UPDATE_MATCH': {
-      let newM = (state.matches || []).map(m => m.id === action.payload.id ? { ...m, ...action.payload.updates } : m);
+      let newM = (state.matches || []).map(m => m && m.id === action.payload.id ? { ...m, ...action.payload.updates } : m);
       newM = cascadeDoubles(newM);
       return { ...state, matches: newM };
     }
@@ -257,7 +263,7 @@ const tournamentReducer = (state, action) => {
       return { ...state, matches: [...(state.matches || []), newMatch] };
     }
     case 'UPDATE_SINGLES_MATCH': {
-      let newSm = (state.singlesMatches || []).map(m => m.id === action.payload.id ? { ...m, ...action.payload.updates } : m);
+      let newSm = (state.singlesMatches || []).map(m => m && m.id === action.payload.id ? { ...m, ...action.payload.updates } : m);
       newSm = cascadeSingles(newSm, state.singlesByeId);
       return { ...state, singlesMatches: newSm };
     }
@@ -270,15 +276,15 @@ const tournamentReducer = (state, action) => {
       return { ...state, singlesMatches: [...(state.singlesMatches || []), newMatch] };
     }
     case 'UPDATE_SINGLES_TEAM': {
-      return { ...state, singlesTeams: (state.singlesTeams || []).map(t => t.id === action.payload.id ? action.payload : t) };
+      return { ...state, singlesTeams: (state.singlesTeams || []).map(t => t && t.id === action.payload.id ? action.payload : t) };
     }
     case 'SET_SINGLES_BYE': {
       let newSm = cascadeSingles((state.singlesMatches || []), action.payload);
       return { ...state, singlesByeId: action.payload, singlesMatches: newSm };
     }
-    case 'UPDATE_TEAM': return { ...state, teams: (state.teams || []).map(t => t.id === action.payload.id ? action.payload : t) };
+    case 'UPDATE_TEAM': return { ...state, teams: (state.teams || []).map(t => t && t.id === action.payload.id ? action.payload : t) };
     case 'ADD_TEAM': return { ...state, teams: [...(state.teams || []), { id: crypto.randomUUID(), ...action.payload }] };
-    case 'DELETE_TEAM': return { ...state, teams: (state.teams || []).filter(t => t.id !== action.payload) };
+    case 'DELETE_TEAM': return { ...state, teams: (state.teams || []).filter(t => t && t.id !== action.payload) };
     case 'RESET_ALL': return INITIAL_STATE;
     default: return state;
   }
@@ -415,15 +421,15 @@ const SinglesPlayers = () => {
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {(state.singlesTeams || []).map(p => (
-          <Card key={p.id} className="relative group hover:border-slate-600 transition-colors">
+          <Card key={p?.id || Math.random()} className="relative group hover:border-slate-600 transition-colors">
             {isSuperAdmin && (
               <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button onClick={() => setEditing(p)} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"><Edit2 size={14}/></button>
               </div>
             )}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-slate-800/50 rounded-full flex items-center justify-center font-black text-slate-300">{p.code}</div>
-              <div><div className="text-[10px] text-emerald-500 font-bold tracking-widest uppercase">Seed {p.seed}</div><div className="font-semibold text-slate-200">{p.player1}</div></div>
+              <div className="w-10 h-10 bg-slate-800/50 rounded-full flex items-center justify-center font-black text-slate-300">{p?.code}</div>
+              <div><div className="text-[10px] text-emerald-500 font-bold tracking-widest uppercase">Seed {p?.seed}</div><div className="font-semibold text-slate-200">{p?.player1}</div></div>
             </div>
           </Card>
         ))}
@@ -453,12 +459,12 @@ const SinglesBracket = ({ onNavigate }) => {
   const [editingSM, setEditingSM] = useState(null);
   const [addingMatch, setAddingMatch] = useState(false);
   const dialog = useDialog();
-  const getS = (matchIds) => matchIds.map(id => (state.singlesMatches || []).find(m => m.id === id));
+  const getS = (matchIds) => matchIds.map(id => (state.singlesMatches || []).find(m => m && m.id === id));
   
   const MatchBox = ({ match, indicatorColor }) => {
     if (!match) return null;
-    const tA = (state.singlesTeams || []).find(t => t.id === match.teamAId);
-    const tB = (state.singlesTeams || []).find(t => t.id === match.teamBId);
+    const tA = (state.singlesTeams || []).find(t => t && t.id === match.teamAId);
+    const tB = (state.singlesTeams || []).find(t => t && t.id === match.teamBId);
     return (
       <Card className={`relative w-72 border-slate-800/80 group ${indicatorColor ? `border-l-2 ${indicatorColor}` : ''}`}>
         <div className="flex justify-between items-center mb-3">
@@ -476,12 +482,12 @@ const SinglesBracket = ({ onNavigate }) => {
         <div className="space-y-3">
           <div className={`flex justify-between items-center ${match.winnerId === match.teamAId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>
             <span className="text-sm truncate pr-2">{tA?.player1 || 'TBD'} <span className="text-[10px] opacity-40 ml-1">({tA?.code||'-'})</span></span>
-            {match.status === 'completed' && match.teamAId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s.a>s.b).length}</span>}
+            {match.status === 'completed' && match.teamAId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s && s.a>s.b).length}</span>}
           </div>
           <div className="h-px bg-slate-800/50"></div>
           <div className={`flex justify-between items-center ${match.winnerId === match.teamBId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>
             <span className="text-sm truncate pr-2">{tB?.player1 || 'TBD'} <span className="text-[10px] opacity-40 ml-1">({tB?.code||'-'})</span></span>
-            {match.status === 'completed' && match.teamBId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s.b>s.a).length}</span>}
+            {match.status === 'completed' && match.teamBId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s && s.b>s.a).length}</span>}
           </div>
         </div>
         {isAdmin && match.status !== 'completed' && match.teamAId && match.teamBId && (
@@ -497,9 +503,9 @@ const SinglesBracket = ({ onNavigate }) => {
   };
 
   const ByePanel = () => {
-    const w7w = (state.singlesTeams || []).find(t => t.id === (state.singlesMatches || []).find(m=>m.id==='W7')?.winnerId);
-    const w8w = (state.singlesTeams || []).find(t => t.id === (state.singlesMatches || []).find(m=>m.id==='W8')?.winnerId);
-    const w9w = (state.singlesTeams || []).find(t => t.id === (state.singlesMatches || []).find(m=>m.id==='W9')?.winnerId);
+    const w7w = (state.singlesTeams || []).find(t => t && t.id === (state.singlesMatches || []).find(m=>m && m.id==='W7')?.winnerId);
+    const w8w = (state.singlesTeams || []).find(t => t && t.id === (state.singlesMatches || []).find(m=>m && m.id==='W8')?.winnerId);
+    const w9w = (state.singlesTeams || []).find(t => t && t.id === (state.singlesMatches || []).find(m=>m && m.id==='W9')?.winnerId);
     const ready = w7w && w8w && w9w;
 
     return (
@@ -526,7 +532,7 @@ const SinglesBracket = ({ onNavigate }) => {
     );
   };
 
-  const customMatches = (state.singlesMatches || []).filter(m => m.id && m.id.startsWith('custom_'));
+  const customMatches = (state.singlesMatches || []).filter(m => m && m.id && m.id.startsWith('custom_'));
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -564,7 +570,7 @@ const SinglesBracket = ({ onNavigate }) => {
                 <div className="flex flex-col gap-12 justify-center h-full border-l border-slate-800/50 pl-12 relative"><div className="text-[10px] font-bold text-purple-500 tracking-widest uppercase mb-2 absolute top-0 -mt-6">Semifinals</div>{getS(['SF1','SF2']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-purple-500" />)}</div>
                 <div className="flex flex-col items-center justify-center h-full border-l border-slate-800/50 pl-12 relative"><Trophy className="text-yellow-500 mb-4 scale-150 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]"/><div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2 absolute -top-6">Grand Final</div>
                    {getS(['GF']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-yellow-500" />)}
-                   {getS(['GF'])[0]?.winnerId && ( <div className="mt-8 text-center animate-in fade-in zoom-in"><div className="text-yellow-400 font-black text-xl uppercase tracking-widest">Singles Champion</div><div className="text-white font-bold text-lg mt-1">{(state.singlesTeams || []).find(t=>t.id===getS(['GF'])[0].winnerId)?.player1}</div></div> )}
+                   {getS(['GF'])?.[0]?.winnerId && ( <div className="mt-8 text-center animate-in fade-in zoom-in"><div className="text-yellow-400 font-black text-xl uppercase tracking-widest">Singles Champion</div><div className="text-white font-bold text-lg mt-1">{(state.singlesTeams || []).find(t=>t && t.id===getS(['GF'])?.[0]?.winnerId)?.player1}</div></div> )}
                 </div>
               </div>
             </div>
@@ -627,12 +633,12 @@ const DoublesBracket = ({ onNavigate }) => {
   const [editingDM, setEditingDM] = useState(null);
   const [addingMatch, setAddingMatch] = useState(false);
   const dialog = useDialog();
-  const getD = (matchIds) => matchIds.map(id => (state.matches || []).find(m => m.id === id));
+  const getD = (matchIds) => matchIds.map(id => (state.matches || []).find(m => m && m.id === id));
   
   const MatchBox = ({ match, indicatorColor }) => {
     if (!match) return null;
-    const tA = (state.teams || []).find(t => t.id === match.teamAId);
-    const tB = (state.teams || []).find(t => t.id === match.teamBId);
+    const tA = (state.teams || []).find(t => t && t.id === match.teamAId);
+    const tB = (state.teams || []).find(t => t && t.id === match.teamBId);
     return (
       <Card className={`relative w-72 border-slate-800/80 group ${indicatorColor ? `border-l-2 ${indicatorColor}` : ''}`}>
         <div className="flex justify-between items-center mb-3">
@@ -650,12 +656,12 @@ const DoublesBracket = ({ onNavigate }) => {
         <div className="space-y-3">
           <div className={`flex justify-between items-center ${match.winnerId === match.teamAId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>
             <span className="text-sm truncate pr-2">{tA ? `${tA.player1} & ${tA.player2}` : 'TBD'} <span className="text-[10px] opacity-40 ml-1">({tA?.code||'-'})</span></span>
-            {match.status === 'completed' && match.teamAId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s.a>s.b).length}</span>}
+            {match.status === 'completed' && match.teamAId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s && s.a>s.b).length}</span>}
           </div>
           <div className="h-px bg-slate-800/50"></div>
           <div className={`flex justify-between items-center ${match.winnerId === match.teamBId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>
             <span className="text-sm truncate pr-2">{tB ? `${tB.player1} & ${tB.player2}` : 'TBD'} <span className="text-[10px] opacity-40 ml-1">({tB?.code||'-'})</span></span>
-            {match.status === 'completed' && match.teamBId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s.b>s.a).length}</span>}
+            {match.status === 'completed' && match.teamBId && <span className="text-sm font-bold">{(match.scores || []).filter(s=>s && s.b>s.a).length}</span>}
           </div>
         </div>
         {isAdmin && match.status !== 'completed' && match.teamAId && match.teamBId && (
@@ -670,7 +676,7 @@ const DoublesBracket = ({ onNavigate }) => {
     );
   };
 
-  const customMatches = (state.matches || []).filter(m => m.id && m.id.startsWith('custom_d_'));
+  const customMatches = (state.matches || []).filter(m => m && m.id && m.id.startsWith('custom_d_'));
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -718,7 +724,7 @@ const DoublesBracket = ({ onNavigate }) => {
                   <Trophy className="text-yellow-500 mb-4 scale-150 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]"/>
                   <div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2 absolute -top-6">Grand Final</div>
                   {getD(['M22']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-yellow-500" />)}
-                   {getD(['M22'])[0]?.winnerId && ( <div className="mt-8 text-center animate-in fade-in zoom-in"><div className="text-yellow-400 font-black text-xl uppercase tracking-widest">Doubles Champion</div><div className="text-white font-bold text-lg mt-1">{(state.teams || []).find(t=>t.id===getD(['M22'])[0].winnerId)?.player1} & {(state.teams || []).find(t=>t.id===getD(['M22'])[0].winnerId)?.player2}</div></div> )}
+                   {getD(['M22'])?.[0]?.winnerId && ( <div className="mt-8 text-center animate-in fade-in zoom-in"><div className="text-yellow-400 font-black text-xl uppercase tracking-widest">Doubles Champion</div><div className="text-white font-bold text-lg mt-1">{(state.teams || []).find(t=>t && t.id===getD(['M22'])?.[0]?.winnerId)?.player1} & {(state.teams || []).find(t=>t && t.id===getD(['M22'])?.[0]?.winnerId)?.player2}</div></div> )}
                 </div>
               </div>
             </div>
@@ -776,9 +782,9 @@ const DoublesBracket = ({ onNavigate }) => {
 
 const LiveScoring = ({ matchId, isSingles, onBack }) => {
   const { state, dispatch } = useContext(TournamentContext);
-  const match = isSingles ? (state.singlesMatches || []).find(m => m.id === matchId) : (state.matches || []).find(m => m.id === matchId);
-  const teamA = isSingles ? (state.singlesTeams || []).find(t => t.id === match?.teamAId) : (state.teams || []).find(t => t.id === match?.teamAId);
-  const teamB = isSingles ? (state.singlesTeams || []).find(t => t.id === match?.teamBId) : (state.teams || []).find(t => t.id === match?.teamBId);
+  const match = isSingles ? (state.singlesMatches || []).find(m => m && m.id === matchId) : (state.matches || []).find(m => m && m.id === matchId);
+  const teamA = isSingles ? (state.singlesTeams || []).find(t => t && t.id === match?.teamAId) : (state.teams || []).find(t => t && t.id === match?.teamAId);
+  const teamB = isSingles ? (state.singlesTeams || []).find(t => t && t.id === match?.teamBId) : (state.teams || []).find(t => t && t.id === match?.teamBId);
 
   const [scores, setScores] = useState(match?.scores || []);
   const [currentGame, setCurrentGame] = useState(match?.liveGame || { a: 0, b: 0 });
@@ -806,7 +812,7 @@ const LiveScoring = ({ matchId, isSingles, onBack }) => {
     
     if(!winnerId && finalScores.length>0) {
       let sa=0, sb=0, pa=0, pb=0;
-      finalScores.forEach(s=>{ pa+=s.a; pb+=s.b; if(s.a>s.b)sa++; else sb++; });
+      finalScores.forEach(s=>{ if(s) { pa+=s.a; pb+=s.b; if(s.a>s.b)sa++; else sb++; } });
       if(sa>sb) winnerId = teamA.id; else if (sb>sa) winnerId = teamB.id; else if(pa>pb) winnerId = teamA.id; else winnerId = teamB.id;
     }
 
@@ -814,8 +820,8 @@ const LiveScoring = ({ matchId, isSingles, onBack }) => {
     onBack();
   };
 
-  const cGA = scores.filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.a > s.b).length;
-  const cGB = scores.filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.b > s.a).length;
+  const cGA = scores.filter(s => s && checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.a > s.b).length;
+  const cGB = scores.filter(s => s && checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.b > s.a).length;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-in slide-in-from-right-4">
@@ -882,11 +888,11 @@ const Dashboard = ({ mode }) => {
             <h3 className="text-sm font-bold text-red-500 uppercase tracking-widest mb-4 flex items-center gap-2"><Activity size={16}/> Active Live Match</h3>
             <div className="grid md:grid-cols-2 gap-4">
                {live.map(match => {
-                  const tA = isSingles ? (state.singlesTeams || []).find(t=>t.id===match.teamAId) : (state.teams || []).find(t=>t.id===match.teamAId);
-                  const tB = isSingles ? (state.singlesTeams || []).find(t=>t.id===match.teamBId) : (state.teams || []).find(t=>t.id===match.teamBId);
+                  const tA = isSingles ? (state.singlesTeams || []).find(t=>t && t.id===match.teamAId) : (state.teams || []).find(t=>t && t.id===match.teamAId);
+                  const tB = isSingles ? (state.singlesTeams || []).find(t=>t && t.id===match.teamBId) : (state.teams || []).find(t=>t && t.id===match.teamBId);
                   let currentGameScore = match.liveGame || {a:0, b:0};
-                  let setsA = (match.scores || []).filter(s => checkGameWin(s.a, s.b, state.settings?.pointsPerGame || 11) && s.a > s.b).length;
-                  let setsB = (match.scores || []).filter(s => checkGameWin(s.a, s.b, state.settings?.pointsPerGame || 11) && s.b > s.a).length;
+                  let setsA = (match.scores || []).filter(s => s && checkGameWin(s.a, s.b, state.settings?.pointsPerGame || 11) && s.a > s.b).length;
+                  let setsB = (match.scores || []).filter(s => s && checkGameWin(s.a, s.b, state.settings?.pointsPerGame || 11) && s.b > s.a).length;
                   
                   return (
                      <Card key={match?.id || Math.random()} className="border-red-500/50 bg-gradient-to-br from-[#1a0505] to-[#0a0000] shadow-[0_0_20px_rgba(239,68,68,0.15)]">
@@ -898,7 +904,7 @@ const Dashboard = ({ mode }) => {
                            <div className="flex justify-between items-center">
                               <div className="flex gap-3 items-center">
                                  <span className="w-8 h-8 rounded-full bg-red-950 flex items-center justify-center text-xs font-black text-red-400 border border-red-900/50">{tA?.code}</span>
-                                 <div><div className="text-sm font-bold text-white">{tA?.player1}</div>{!isSingles && <div className="text-xs text-red-200/50">{tA?.player2}</div>}</div>
+                                 <div><div className="text-sm font-bold text-white">{tA?.player1 || 'TBD'}</div>{!isSingles && <div className="text-xs text-red-200/50">{tA?.player2 || ''}</div>}</div>
                               </div>
                               <div className="flex items-center gap-4">
                                  <div className="text-xs font-bold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded">S: {setsA}</div>
@@ -908,7 +914,7 @@ const Dashboard = ({ mode }) => {
                            <div className="flex justify-between items-center">
                               <div className="flex gap-3 items-center">
                                  <span className="w-8 h-8 rounded-full bg-red-950 flex items-center justify-center text-xs font-black text-red-400 border border-red-900/50">{tB?.code}</span>
-                                 <div><div className="text-sm font-bold text-white">{tB?.player1}</div>{!isSingles && <div className="text-xs text-red-200/50">{tB?.player2}</div>}</div>
+                                 <div><div className="text-sm font-bold text-white">{tB?.player1 || 'TBD'}</div>{!isSingles && <div className="text-xs text-red-200/50">{tB?.player2 || ''}</div>}</div>
                               </div>
                               <div className="flex items-center gap-4">
                                  <div className="text-xs font-bold text-blue-500 bg-blue-500/10 px-2 py-1 rounded">S: {setsB}</div>
@@ -928,8 +934,8 @@ const Dashboard = ({ mode }) => {
            <h3 className="text-sm font-bold text-blue-400 uppercase tracking-widest mb-4 flex items-center gap-2"><CalendarDays size={16}/> Today's Schedule (Oct 6)</h3>
            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
              {todaysMatches.map(match => {
-               const tA = isSingles ? (state.singlesTeams || []).find(t=>t.id===match.teamAId) : (state.teams || []).find(t=>t.id===match.teamAId);
-               const tB = isSingles ? (state.singlesTeams || []).find(t=>t.id===match.teamBId) : (state.teams || []).find(t=>t.id===match.teamBId);
+               const tA = isSingles ? (state.singlesTeams || []).find(t=>t && t.id===match.teamAId) : (state.teams || []).find(t=>t && t.id===match.teamAId);
+               const tB = isSingles ? (state.singlesTeams || []).find(t=>t && t.id===match.teamBId) : (state.teams || []).find(t=>t && t.id===match.teamBId);
                return (
                  <Card key={match?.id || Math.random()} className={`border-l-4 ${match.status === 'completed' ? 'border-l-emerald-500' : 'border-l-blue-500'}`}>
                     <div className="flex justify-between items-center mb-3">
@@ -937,9 +943,9 @@ const Dashboard = ({ mode }) => {
                       <span className={`text-[9px] font-bold px-2 py-1 rounded uppercase tracking-wider ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':'bg-slate-800/50 text-slate-500'}`}>{match.status}</span>
                     </div>
                     <div className="space-y-2">
-                       <div className={`text-sm ${match.winnerId === match.teamAId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>{tA ? (isSingles ? tA.player1 : `${tA.player1} & ${tA.player2}`) : 'TBD'}</div>
+                       <div className={`text-sm ${match.winnerId === match.teamAId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>{tA ? (isSingles ? tA.player1 : `${tA.player1 || ''} & ${tA.player2 || ''}`) : 'TBD'}</div>
                        <div className="text-[10px] text-slate-600 font-black tracking-widest uppercase">VS</div>
-                       <div className={`text-sm ${match.winnerId === match.teamBId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>{tB ? (isSingles ? tB.player1 : `${tB.player1} & ${tB.player2}`) : 'TBD'}</div>
+                       <div className={`text-sm ${match.winnerId === match.teamBId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>{tB ? (isSingles ? tB.player1 : `${tB.player1 || ''} & ${tB.player2 || ''}`) : 'TBD'}</div>
                     </div>
                  </Card>
                );
@@ -958,18 +964,20 @@ const PointsTable = ({ mode }) => {
   const matches = isSingles ? (state.singlesMatches || []) : (state.matches || []);
 
   const standings = useMemo(() => {
-    const stats = teams.reduce((acc, t) => {
-      acc[t.id] = { ...t, MP: 0, W: 0, L: 0, SW: 0, SL: 0, PTS: 0 };
+    const stats = (teams || []).reduce((acc, t) => {
+      if (t && t.id) acc[t.id] = { ...t, MP: 0, W: 0, L: 0, SW: 0, SL: 0, PTS: 0 };
       return acc;
     }, {});
 
-    matches.forEach(m => {
-      if (m.status === 'completed' && m.teamAId && m.teamBId) {
+    (matches || []).forEach(m => {
+      if (m && m.status === 'completed' && m.teamAId && m.teamBId) {
         const a = m.teamAId; const b = m.teamBId;
         if(!stats[a] || !stats[b]) return;
         stats[a].MP++; stats[b].MP++;
         let sa = 0, sb = 0;
-        (m.scores || []).forEach(s => { if(s.a > s.b) sa++; else if(s.b > s.a) sb++; });
+        (m.scores || []).forEach(s => { 
+            if(s && s.a > s.b) sa++; else if (s && s.b > s.a) sb++; 
+        });
         stats[a].SW += sa; stats[a].SL += sb;
         stats[b].SW += sb; stats[b].SL += sa;
 
@@ -979,9 +987,9 @@ const PointsTable = ({ mode }) => {
     });
 
     return Object.values(stats).sort((a, b) => {
-      if (b.PTS !== a.PTS) return b.PTS - a.PTS;
-      if (b.W !== a.W) return b.W - a.W;
-      return (b.SW - b.SL) - (a.SW - a.SL);
+      if (b.PTS !== a.PTS) return (b.PTS || 0) - (a.PTS || 0);
+      if (b.W !== a.W) return (b.W || 0) - (a.W || 0);
+      return ((b.SW || 0) - (b.SL || 0)) - ((a.SW || 0) - (a.SL || 0));
     });
   }, [teams, matches]);
 
