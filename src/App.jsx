@@ -15,7 +15,7 @@ const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 // New cache key to ensure fresh local execution without hurting the cloud
-const LOCAL_STORAGE_KEY = 'smashfest_state_v40_bulletproof'; 
+const LOCAL_STORAGE_KEY = 'smashfest_state_v50_final_absolute'; 
 
 let firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -229,7 +229,7 @@ const tournamentReducer = (state, action) => {
       const mergedSinglesTeams = (incoming.singlesTeams && incoming.singlesTeams.length > 0) ? incoming.singlesTeams : (state.singlesTeams || INITIAL_SINGLES_PLAYERS);
       
       let mergedMatches = incoming.matches || INITIAL_MATCHES;
-      // Force an upgrade to M01-M22 format for Doubles ONLY IF it's using the old obsolete formats
+      // Smart check: If cloud data has old 'm1' format instead of 'M01', upgrade it automatically for Doubles
       const isOldFormat = mergedMatches.some(m => m && (m.id === 'ko_qf1' || m.id === 'm1'));
       if (isOldFormat) mergedMatches = INITIAL_MATCHES;
 
