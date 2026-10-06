@@ -14,8 +14,8 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'smashfest-local-depl
 const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// Storage key changed to auto-reset old data and load the exact requested setup
-const LOCAL_STORAGE_KEY = 'smashfest_state_v5'; 
+// Storage key changed to v6 to load the new Quarter-Finals structure
+const LOCAL_STORAGE_KEY = 'smashfest_state_v6'; 
 
 let firebaseConfig = {
   apiKey: "YOUR_API_KEY",
@@ -34,7 +34,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Pre-loaded Teams matching exactly with the user's spreadsheet image
 const INITIAL_TEAMS = [
   { id: 't1', code: 'A1', player1: 'Utpal', player2: 'Pardeep', group: 'A', seed: 1 },
   { id: 't2', code: 'A2', player1: 'Madhwan', player2: 'Utkarsh', group: 'A', seed: 2 },
@@ -56,7 +55,6 @@ const DEFAULT_SETTINGS = {
   pointsWin: 2, pointsLoss: 0, bestOf: 3, pointsPerGame: 11, tables: 2,
 };
 
-// Pre-loaded Matches (Day 1 to Day 7 exactly matched to images)
 const INITIAL_MATCHES = [
   // DAY 01
   { id: 'm1', groupId: 'B', round: 'Day 01', teamAId: 't7', teamBId: 't8', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/06/2026', time: '10:00' },
@@ -103,8 +101,14 @@ const INITIAL_MATCHES = [
   { id: 'm30', groupId: 'A', round: 'Day 07', teamAId: 't1', teamBId: 't5', status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '10/14/2026', time: '11:00' },
 
   // PRE-BUILT KNOCKOUTS (Auto Progression Enabled)
+  { id: 'ko_qf1', groupId: 'KO', round: 'Quarter-Final', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '', time: '' },
+  { id: 'ko_qf2', groupId: 'KO', round: 'Quarter-Final', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '', time: '' },
+  { id: 'ko_qf3', groupId: 'KO', round: 'Quarter-Final', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Table 1', date: '', time: '' },
+  { id: 'ko_qf4', groupId: 'KO', round: 'Quarter-Final', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Table 2', date: '', time: '' },
+  
   { id: 'ko_sf1', groupId: 'KO', round: 'Semi-Final', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Center Court', date: '', time: '' },
   { id: 'ko_sf2', groupId: 'KO', round: 'Semi-Final', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Center Court', date: '', time: '' },
+  
   { id: 'ko_final', groupId: 'KO', round: 'Grand Final', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Center Court', date: '', time: '' },
 ];
 
@@ -196,9 +200,21 @@ const tournamentReducer = (state, action) => {
       const { id, updates } = action.payload;
       let newMatches = state.matches.map(m => m.id === id ? { ...m, ...updates } : m);
 
-      // AUTO PROGRESSION TO GRAND FINAL
+      // AUTO PROGRESSION QF -> SF -> GRAND FINAL
       if (updates.status === 'completed' && updates.winnerId) {
-        if (id === 'ko_sf1' || id === 'ko_sf2') {
+        if (id.startsWith('ko_qf')) {
+           const qf1Winner = newMatches.find(m => m.id === 'ko_qf1')?.winnerId || null;
+           const qf2Winner = newMatches.find(m => m.id === 'ko_qf2')?.winnerId || null;
+           const qf3Winner = newMatches.find(m => m.id === 'ko_qf3')?.winnerId || null;
+           const qf4Winner = newMatches.find(m => m.id === 'ko_qf4')?.winnerId || null;
+           
+           newMatches = newMatches.map(m => {
+             if (m.id === 'ko_sf1') return { ...m, teamAId: qf1Winner, teamBId: qf2Winner };
+             if (m.id === 'ko_sf2') return { ...m, teamAId: qf3Winner, teamBId: qf4Winner };
+             return m;
+           });
+        }
+        else if (id === 'ko_sf1' || id === 'ko_sf2') {
            const sf1Winner = newMatches.find(m => m.id === 'ko_sf1')?.winnerId || null;
            const sf2Winner = newMatches.find(m => m.id === 'ko_sf2')?.winnerId || null;
            newMatches = newMatches.map(m => m.id === 'ko_final' ? { ...m, teamAId: sf1Winner, teamBId: sf2Winner } : m);
@@ -208,10 +224,12 @@ const tournamentReducer = (state, action) => {
     }
 
     case 'QUALIFY_KNOCKOUTS': {
-      const { a1, a2, b1, b2 } = action.payload;
+      const { a1, a2, a3, a4, b1, b2, b3, b4 } = action.payload;
       const newMatches = state.matches.map(m => {
-        if(m.id === 'ko_sf1') return { ...m, teamAId: a1, teamBId: b2 };
-        if(m.id === 'ko_sf2') return { ...m, teamAId: b1, teamBId: a2 };
+        if(m.id === 'ko_qf1') return { ...m, teamAId: a1, teamBId: b4 };
+        if(m.id === 'ko_qf2') return { ...m, teamAId: b2, teamBId: a3 };
+        if(m.id === 'ko_qf3') return { ...m, teamAId: b1, teamBId: a4 };
+        if(m.id === 'ko_qf4') return { ...m, teamAId: a2, teamBId: b3 };
         return m;
       });
       return { ...state, matches: newMatches };
@@ -447,10 +465,13 @@ const KnockoutBracket = ({ onNavigate }) => {
   const handleQualify = () => {
     const stA = calculateGroupStandings(state.teams.filter(t=>t.group==='A'), state.matches, state.settings);
     const stB = calculateGroupStandings(state.teams.filter(t=>t.group==='B'), state.matches, state.settings);
-    if(stA.length < 2 || stB.length < 2) { dialog.alert("Not Ready", "Need at least 2 teams in each group."); return; }
+    if(stA.length < 4 || stB.length < 4) { dialog.alert("Not Ready", "Need at least 4 teams in each group to create Quarter-Finals."); return; }
     
-    dialog.confirm("Lock Groups & Qualify?", "This will push the Top 2 teams from Group A and B into the Semi-Finals.", () => {
-       dispatch({ type: 'QUALIFY_KNOCKOUTS', payload: { a1: stA[0].id, a2: stA[1].id, b1: stB[0].id, b2: stB[1].id } });
+    dialog.confirm("Lock Groups & Qualify?", "This will push the Top 4 teams from Group A and B into the Quarter-Finals.", () => {
+       dispatch({ type: 'QUALIFY_KNOCKOUTS', payload: { 
+         a1: stA[0].id, a2: stA[1].id, a3: stA[2].id, a4: stA[3].id, 
+         b1: stB[0].id, b2: stB[1].id, b3: stB[2].id, b4: stB[3].id 
+       } });
     });
   };
 
@@ -463,6 +484,10 @@ const KnockoutBracket = ({ onNavigate }) => {
     } catch (e) { dialog.alert("Error", "Failed to publish."); }
   };
 
+  const qf1 = state.matches.find(m => m.id === 'ko_qf1');
+  const qf2 = state.matches.find(m => m.id === 'ko_qf2');
+  const qf3 = state.matches.find(m => m.id === 'ko_qf3');
+  const qf4 = state.matches.find(m => m.id === 'ko_qf4');
   const sf1 = state.matches.find(m => m.id === 'ko_sf1');
   const sf2 = state.matches.find(m => m.id === 'ko_sf2');
   const finalMatch = state.matches.find(m => m.id === 'ko_final');
@@ -474,13 +499,13 @@ const KnockoutBracket = ({ onNavigate }) => {
     const isClickable = match.teamAId && match.teamBId;
 
     return (
-      <Card className="relative overflow-hidden w-72 lg:w-80 border-slate-700/50 shadow-xl bg-slate-900/90 backdrop-blur">
+      <Card className="relative overflow-hidden w-64 lg:w-72 border-slate-700/50 shadow-xl bg-slate-900/90 backdrop-blur">
         {match.status === 'live' && <div className="absolute top-0 left-0 w-1 h-full bg-red-500 animate-pulse"></div>}
         {match.status === 'completed' && <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500"></div>}
         
         <div className="flex justify-between items-center mb-3">
-          <div className="text-[10px] font-bold text-yellow-500 uppercase tracking-widest">{title}</div>
-          <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':match.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800 text-slate-400'}`}>
+          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{title}</div>
+          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':match.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800 text-slate-400'}`}>
             {match.status}
           </span>
         </div>
@@ -488,23 +513,23 @@ const KnockoutBracket = ({ onNavigate }) => {
         <div className="space-y-3">
           <div className={`flex justify-between items-center ${match.winnerId === match.teamAId ? 'text-emerald-400 font-bold' : 'text-slate-200'}`}>
             <div className="flex gap-2 items-center">
-              <span className="w-6 text-sm opacity-50">{tA?.code || '-'}</span>
-              <span className="text-sm truncate max-w-[120px]">{tA?.player1 || 'TBD'} {tA?.player2 ? `& ${tA.player2}` : ''}</span>
+              <span className="w-5 text-xs opacity-50">{tA?.code || '-'}</span>
+              <span className="text-xs truncate max-w-[100px]">{tA?.player1 || 'TBD'}</span>
             </div>
-            {match.status === 'completed' && match.teamAId && <span className="text-lg">{match.scores.filter(s=>s.a>s.b).length}</span>}
+            {match.status === 'completed' && match.teamAId && <span className="text-sm font-bold">{match.scores.filter(s=>s.a>s.b).length}</span>}
           </div>
           <div className={`flex justify-between items-center ${match.winnerId === match.teamBId ? 'text-emerald-400 font-bold' : 'text-slate-200'}`}>
             <div className="flex gap-2 items-center">
-              <span className="w-6 text-sm opacity-50">{tB?.code || '-'}</span>
-              <span className="text-sm truncate max-w-[120px]">{tB?.player1 || 'TBD'} {tB?.player2 ? `& ${tB.player2}` : ''}</span>
+              <span className="w-5 text-xs opacity-50">{tB?.code || '-'}</span>
+              <span className="text-xs truncate max-w-[100px]">{tB?.player1 || 'TBD'}</span>
             </div>
-            {match.status === 'completed' && match.teamBId && <span className="text-lg">{match.scores.filter(s=>s.b>s.a).length}</span>}
+            {match.status === 'completed' && match.teamBId && <span className="text-sm font-bold">{match.scores.filter(s=>s.b>s.a).length}</span>}
           </div>
         </div>
 
         {match.status !== 'completed' && isClickable && (
-          <div className="mt-4 pt-4 border-t border-slate-800 flex gap-2">
-            <Button className="flex-1 text-xs py-1.5" variant={match.status === 'live' ? 'primary' : 'secondary'} onClick={() => {
+          <div className="mt-4 pt-3 border-t border-slate-800 flex gap-2">
+            <Button className="flex-1 text-[10px] py-1" variant={match.status === 'live' ? 'primary' : 'secondary'} onClick={() => {
                 if(match.status === 'upcoming') dispatch({ type: 'UPDATE_MATCH', payload: { id: match.id, updates: { status: 'live' } }});
                 onNavigate('live', match.id);
               }}>{match.status === 'live' ? 'Resume Scoring' : 'Live Score'}</Button>
@@ -518,22 +543,28 @@ const KnockoutBracket = ({ onNavigate }) => {
     <div className="space-y-6">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-white">Knockout Bracket</h2>
-        <Button onClick={handleQualify} icon={Zap} variant="primary">Qualify Top Teams</Button>
+        <Button onClick={handleQualify} icon={Zap} variant="primary">Qualify Top 8</Button>
       </div>
 
       <div className="overflow-x-auto pb-12">
-        <div className="min-w-[800px] flex justify-center items-center gap-12 mt-12">
-          {/* Semifinals */}
-          <div className="flex flex-col gap-16 relative">
-            <MatchBox match={sf1} title="Semifinal 1 (A1 vs B2)" />
-            <MatchBox match={sf2} title="Semifinal 2 (B1 vs A2)" />
-            <svg className="absolute left-full top-0 w-12 h-full pointer-events-none -z-10 text-slate-700">
-               <path d="M0,80 L24,80 L24,240 L0,240" fill="none" stroke="currentColor" strokeWidth="2" />
-               <path d="M24,160 L48,160" fill="none" stroke="currentColor" strokeWidth="2" />
-            </svg>
+        <div className="min-w-[900px] flex justify-start items-center gap-8 mt-4">
+          
+          {/* Quarterfinals */}
+          <div className="flex flex-col gap-6 relative z-10">
+            <MatchBox match={qf1} title="QF1 (A1 vs B4)" />
+            <MatchBox match={qf2} title="QF2 (B2 vs A3)" />
+            <MatchBox match={qf3} title="QF3 (B1 vs A4)" />
+            <MatchBox match={qf4} title="QF4 (A2 vs B3)" />
           </div>
+
+          {/* Semifinals */}
+          <div className="flex flex-col justify-around h-[580px] relative z-10">
+            <MatchBox match={sf1} title="SF1 (Winner QF1 vs QF2)" />
+            <MatchBox match={sf2} title="SF2 (Winner QF3 vs QF4)" />
+          </div>
+
           {/* Final */}
-          <div className="flex flex-col justify-center">
+          <div className="flex flex-col justify-center h-[580px] relative z-10 ml-8">
             <div className="flex flex-col items-center relative">
               <Trophy className={`mb-4 transition-all duration-1000 ${finalMatch?.winnerId ? 'text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)] scale-125' : 'text-yellow-700/50'}`} size={48} />
               <MatchBox match={finalMatch} title="GRAND FINAL" />
@@ -548,9 +579,9 @@ const KnockoutBracket = ({ onNavigate }) => {
               )}
             </div>
           </div>
+          
         </div>
       </div>
-      {quickScoreMatch && <QuickScoreForm match={quickScoreMatch} onClose={() => setQuickScoreMatch(null)} />}
     </div>
   );
 };
@@ -573,8 +604,8 @@ const StandingsTable = ({ group, title }) => {
         </thead>
         <tbody className="divide-y divide-slate-800/50">
           {standings.map((team, idx) => (
-            <tr key={team.id} className={`hover:bg-slate-800/30 ${idx < 2 ? 'bg-emerald-900/5' : ''}`}>
-              <td className="p-4 text-center">{idx < 2 ? <span className={`inline-flex w-6 h-6 items-center justify-center rounded-full font-bold text-sm ${idx===0?'bg-yellow-500/20 text-yellow-500':'bg-slate-300/20 text-slate-300'}`}>{idx+1}</span> : <span className="text-slate-500 font-bold">{idx + 1}</span>}</td>
+            <tr key={team.id} className={`hover:bg-slate-800/30 ${idx < 4 ? 'bg-emerald-900/5' : ''}`}>
+              <td className="p-4 text-center">{idx < 4 ? <span className={`inline-flex w-6 h-6 items-center justify-center rounded-full font-bold text-sm ${idx===0?'bg-yellow-500/20 text-yellow-500':'bg-emerald-500/20 text-emerald-400'}`}>{idx+1}</span> : <span className="text-slate-500 font-bold">{idx + 1}</span>}</td>
               <td className="p-4"><div className="font-bold text-white">{team.code}</div><div className="text-xs text-slate-400">{team.player1} & {team.player2}</div></td>
               <td className="p-4 text-center text-slate-300">{team.MP}</td><td className="p-4 text-center text-emerald-400">{team.W}</td><td className="p-4 text-center text-red-400">{team.L}</td>
               <td className="p-4 text-center font-black text-white text-lg">{team.PTS}</td>
