@@ -15,7 +15,7 @@ const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 // Storage key updated to refresh safely with new UI and live metrics
-const LOCAL_STORAGE_KEY = 'smashfest_state_v12_unified_live'; 
+const LOCAL_STORAGE_KEY = 'smashfest_state_v13_vct_final'; 
 
 let firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -115,44 +115,67 @@ const INITIAL_MATCHES = [
   { id: 'ko_final', groupId: 'KO', round: 'F', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Center Court', date: '', time: '' },
 ];
 
-const INITIAL_SINGLES_PLAYERS = Array.from({length: 24}).map((_, i) => ({
-  id: `s_a${i+1}`, code: `A${i+1}`, player1: `Player ${i+1}`, seed: i+1
-}));
+const INITIAL_SINGLES_PLAYERS = [
+  { id: 's_a1', code: 'S1', player1: 'Utpal Tripathi', seed: 1 },
+  { id: 's_a2', code: 'S2', player1: 'Vishnu K. Pandey', seed: 2 },
+  { id: 's_a3', code: 'S3', player1: 'Nishant', seed: 3 },
+  { id: 's_a4', code: 'S4', player1: 'Vishal', seed: 4 },
+  { id: 's_a5', code: 'S5', player1: 'Moksh Yadav', seed: 5 },
+  { id: 's_a6', code: 'S6', player1: 'Om Mishra', seed: 6 },
+  { id: 's_a7', code: 'S7', player1: 'Extra Mem', seed: 7 },
+  { id: 's_a8', code: 'S8', player1: 'Utkarsh Yaduvanshi', seed: 8 },
+  { id: 's_a9', code: 'S9', player1: 'Fazlu', seed: 9 },
+  { id: 's_a10', code: 'S10', player1: 'Vineet K. Yadav', seed: 10 },
+  { id: 's_a11', code: 'S11', player1: 'Himanshu Deb', seed: 11 },
+  { id: 's_a12', code: 'S12', player1: 'Karan Kamal', seed: 12 },
+  { id: 's_a13', code: 'S13', player1: 'Pardeep Sir', seed: 13 },
+  { id: 's_a14', code: 'S14', player1: 'Chetan Sharma', seed: 14 },
+  { id: 's_a15', code: 'S15', player1: 'Taqi', seed: 15 },
+  { id: 's_a16', code: 'S16', player1: 'Ansh Pratap Rao', seed: 16 },
+  { id: 's_a17', code: 'S17', player1: 'Saloni Kumari', seed: 17 },
+  { id: 's_a18', code: 'S18', player1: 'Shivam Singh', seed: 18 },
+  { id: 's_a19', code: 'S19', player1: 'Nitin Maurya', seed: 19 },
+  { id: 's_a20', code: 'S20', player1: 'Devansh Singh', seed: 20 },
+  { id: 's_a21', code: 'S21', player1: 'Madhwan Rai', seed: 21 },
+  { id: 's_a22', code: 'S22', player1: 'Eklavya', seed: 22 },
+  { id: 's_a23', code: 'S23', player1: 'Abhitesh Srivastava', seed: 23 },
+  { id: 's_a24', code: 'S24', player1: 'Omm Prakash Lenka', seed: 24 }
+];
 
 const S_MATCH_TEMPLATE = (id, a, b, title) => ({
   id, isSingles: true, title, teamAId: a, teamBId: b, status: 'upcoming', scores: [], winnerId: null
 });
 
 const INITIAL_SINGLES_MATCHES = [
-  S_MATCH_TEMPLATE('M1', 's_a1', 's_a24', 'M1 (1 v 24)'), S_MATCH_TEMPLATE('M2', 's_a12', 's_a13', 'M2 (12 v 13)'),
-  S_MATCH_TEMPLATE('M3', 's_a6', 's_a19', 'M3 (6 v 19)'), S_MATCH_TEMPLATE('M4', 's_a7', 's_a18', 'M4 (7 v 18)'),
-  S_MATCH_TEMPLATE('M5', 's_a4', 's_a21', 'M5 (4 v 21)'), S_MATCH_TEMPLATE('M6', 's_a9', 's_a16', 'M6 (9 v 16)'),
-  S_MATCH_TEMPLATE('M7', 's_a5', 's_a20', 'M7 (5 v 20)'), S_MATCH_TEMPLATE('M8', 's_a8', 's_a17', 'M8 (8 v 17)'),
-  S_MATCH_TEMPLATE('M9', 's_a3', 's_a22', 'M9 (3 v 22)'), S_MATCH_TEMPLATE('M10', 's_a10', 's_a15', 'M10 (10 v 15)'),
-  S_MATCH_TEMPLATE('M11', 's_a2', 's_a23', 'M11 (2 v 23)'), S_MATCH_TEMPLATE('M12', 's_a11', 's_a14', 'M12 (11 v 14)'),
+  S_MATCH_TEMPLATE('M1', 's_a1', 's_a2', 'M1 (6 Oct)'), S_MATCH_TEMPLATE('M2', 's_a3', 's_a4', 'M2 (6 Oct)'),
+  S_MATCH_TEMPLATE('M3', 's_a5', 's_a6', 'M3 (6 Oct)'), S_MATCH_TEMPLATE('M4', 's_a7', 's_a8', 'M4 (6 Oct)'),
+  S_MATCH_TEMPLATE('M5', 's_a9', 's_a10', 'M5 (6 Oct)'), S_MATCH_TEMPLATE('M6', 's_a11', 's_a12', 'M6 (6 Oct)'),
+  S_MATCH_TEMPLATE('M7', 's_a13', 's_a14', 'M7 (9 Oct)'), S_MATCH_TEMPLATE('M8', 's_a15', 's_a16', 'M8 (7 Oct)'),
+  S_MATCH_TEMPLATE('M9', 's_a17', 's_a18', 'M9 (7 Oct)'), S_MATCH_TEMPLATE('M10', 's_a19', 's_a20', 'M10 (7 Oct)'),
+  S_MATCH_TEMPLATE('M11', 's_a21', 's_a22', 'M11 (7 Oct)'), S_MATCH_TEMPLATE('M12', 's_a23', 's_a24', 'M12 (7 Oct)'),
   
-  S_MATCH_TEMPLATE('W1', null, null, 'W1 (Win M1 v Win M2)'), S_MATCH_TEMPLATE('W2', null, null, 'W2 (Win M3 v Win M4)'),
-  S_MATCH_TEMPLATE('W3', null, null, 'W3 (Win M5 v Win M6)'), S_MATCH_TEMPLATE('W4', null, null, 'W4 (Win M7 v Win M8)'),
-  S_MATCH_TEMPLATE('W5', null, null, 'W5 (Win M9 v Win M10)'), S_MATCH_TEMPLATE('W6', null, null, 'W6 (Win M11 v Win M12)'),
+  S_MATCH_TEMPLATE('W1', null, null, 'W1 (8 Oct)'), S_MATCH_TEMPLATE('W2', null, null, 'W2 (8 Oct)'),
+  S_MATCH_TEMPLATE('W3', null, null, 'W3 (8 Oct)'), S_MATCH_TEMPLATE('W4', null, null, 'W4 (9 Oct)'),
+  S_MATCH_TEMPLATE('W5', null, null, 'W5 (9 Oct)'), S_MATCH_TEMPLATE('W6', null, null, 'W6 (7 Oct)'),
 
-  S_MATCH_TEMPLATE('L1', null, null, 'L1 (Los M1 v Los M2)'), S_MATCH_TEMPLATE('L2', null, null, 'L2 (Los M3 v Los M4)'),
-  S_MATCH_TEMPLATE('L3', null, null, 'L3 (Los M5 v Los M6)'), S_MATCH_TEMPLATE('L4', null, null, 'L4 (Los M7 v Los M8)'),
-  S_MATCH_TEMPLATE('L5', null, null, 'L5 (Los M9 v Los M10)'), S_MATCH_TEMPLATE('L6', null, null, 'L6 (Los M11 v Los M12)'),
+  S_MATCH_TEMPLATE('L1', null, null, 'L1 (8 Oct)'), S_MATCH_TEMPLATE('L2', null, null, 'L2 (8 Oct)'),
+  S_MATCH_TEMPLATE('L3', null, null, 'L3 (8 Oct)'), S_MATCH_TEMPLATE('L4', null, null, 'L4 (9 Oct)'),
+  S_MATCH_TEMPLATE('L5', null, null, 'L5 (9 Oct)'), S_MATCH_TEMPLATE('L6', null, null, 'L6 (9 Oct)'),
 
-  S_MATCH_TEMPLATE('W7', null, null, 'W7 (Win W1 v Win W2)'), S_MATCH_TEMPLATE('W8', null, null, 'W8 (Win W3 v Win W4)'),
-  S_MATCH_TEMPLATE('W9', null, null, 'W9 (Win W5 v Win W6)'),
+  S_MATCH_TEMPLATE('W7', null, null, 'W7 (12 Oct)'), S_MATCH_TEMPLATE('W8', null, null, 'W8 (12 Oct)'),
+  S_MATCH_TEMPLATE('W9', null, null, 'W9 (12 Oct)'),
 
-  S_MATCH_TEMPLATE('L7', null, null, 'L7 (Win L1 v Los W1)'), S_MATCH_TEMPLATE('L8', null, null, 'L8 (Win L2 v Los W2)'),
-  S_MATCH_TEMPLATE('L9', null, null, 'L9 (Win L3 v Los W3)'), S_MATCH_TEMPLATE('L10', null, null, 'L10 (Win L4 v Los W4)'),
-  S_MATCH_TEMPLATE('L11', null, null, 'L11 (Win L5 v Los W5)'), S_MATCH_TEMPLATE('L12', null, null, 'L12 (Win L6 v Los W6)'),
-  S_MATCH_TEMPLATE('L13', null, null, 'L13 (Win L7 v Win L8)'), S_MATCH_TEMPLATE('L14', null, null, 'L14 (Win L9 v Win L10)'),
-  S_MATCH_TEMPLATE('L15', null, null, 'L15 (Win L11 v Win L12)'),
+  S_MATCH_TEMPLATE('L7', null, null, 'L7 (12 Oct)'), S_MATCH_TEMPLATE('L8', null, null, 'L8 (12 Oct)'),
+  S_MATCH_TEMPLATE('L9', null, null, 'L9 (12 Oct)'), S_MATCH_TEMPLATE('L10', null, null, 'L10 (13 Oct)'),
+  S_MATCH_TEMPLATE('L11', null, null, 'L11 (13 Oct)'), S_MATCH_TEMPLATE('L12', null, null, 'L12 (13 Oct)'),
+  S_MATCH_TEMPLATE('L13', null, null, 'L13 (13 Oct)'), S_MATCH_TEMPLATE('L14', null, null, 'L14 (13 Oct)'),
+  S_MATCH_TEMPLATE('L15', null, null, 'L15 (14 Oct)'),
 
-  S_MATCH_TEMPLATE('L16', null, null, 'L16 (Los W7 v Los W8)'), S_MATCH_TEMPLATE('L17', null, null, 'L17 (Los W9 v Los W10)'),
-  S_MATCH_TEMPLATE('W10', null, null, 'W10 (Final Winner Stage)'),
+  S_MATCH_TEMPLATE('L16', null, null, 'L16 (14 Oct)'), S_MATCH_TEMPLATE('L17', null, null, 'L17 (14 Oct)'),
+  S_MATCH_TEMPLATE('W10', null, null, 'W10 (13 Oct)'),
 
-  S_MATCH_TEMPLATE('SF1', null, null, 'SF1 (BYE v Win L17)'), S_MATCH_TEMPLATE('SF2', null, null, 'SF2 (Win W10 v Win L16)'),
-  S_MATCH_TEMPLATE('GF', null, null, 'GRAND FINAL (Win SF1 v Win SF2)'),
+  S_MATCH_TEMPLATE('SF1', null, null, 'SF1 (15 Oct)'), S_MATCH_TEMPLATE('SF2', null, null, 'SF2 (15 Oct)'),
+  S_MATCH_TEMPLATE('GF', null, null, 'GRAND FINAL (16 Oct)'),
 ];
 
 const INITIAL_STATE = {
@@ -688,8 +711,6 @@ const Dashboard = ({ mode }) => {
                   let setsA = match.scores.filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.a > s.b).length;
                   let setsB = match.scores.filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.b > s.a).length;
                   
-                  // Simple check if the current active game is not yet 'won' visually (if it's missing from sets due to not hitting next game, it shows here)
-                  // For a pure spectator view, we just show the array.
                   return (
                      <Card key={match.id} className="border-yellow-500/30 bg-gradient-to-br from-[#0a0a0a] to-[#0d0d00]">
                         <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-800/80">
