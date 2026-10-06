@@ -15,7 +15,7 @@ const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 // Storage key updated to clear old browser cache safely
-const LOCAL_STORAGE_KEY = 'smashfest_state_v15_vct_final'; 
+const LOCAL_STORAGE_KEY = 'smashfest_state_v16_final_names'; 
 
 let firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -35,7 +35,9 @@ const SYNC_ENABLED = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 const app = SYNC_ENABLED ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
-const stateDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'live_tournament', 'state');
+
+// CHANGED THIS LINE: Creates a completely fresh database slot so old names are ignored automatically
+const stateDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'smashfest_final_v2', 'state');
 
 const stableStringify = (v) => JSON.stringify(v, (k, val) =>
   val && typeof val === 'object' && !Array.isArray(val)
@@ -103,7 +105,6 @@ const INITIAL_MATCHES = [
   { id: 'ko_final', groupId: 'KO', round: 'F', teamAId: null, teamBId: null, status: 'upcoming', scores: [], winnerId: null, table: 'Center Court', date: '', time: '' },
 ];
 
-// Added exactly from your poster to fix missing names
 const INITIAL_SINGLES_PLAYERS = [
   { id: 's_a1', code: 'A1', player1: 'Utpal Tripathi', seed: 1 },
   { id: 's_a2', code: 'A2', player1: 'Madhwan Rai', seed: 2 },
@@ -959,7 +960,7 @@ const Settings = () => {
       {isSuperAdmin && (
         <Card className="border-red-500/20 bg-red-500/5">
           <h3 className="text-red-500 font-bold flex items-center gap-2 mb-4 tracking-widest uppercase text-xs"><AlertTriangle size={16}/> Danger Zone</h3>
-          <Button onClick={() => dialog.confirm("Factory Reset", "Erase EVERYTHING?", () => { dispatch({ type: 'RESET_ALL' }); window.location.reload(); }, true)} variant="danger">Factory Reset Tournament</Button>
+          <Button onClick={() => dialog.confirm("Factory Reset", "Erase EVERYTHING?", () => { dispatch({ type: 'RESET_ALL' }); setTimeout(() => window.location.reload(), 1000); }, true)} variant="danger">Factory Reset Tournament</Button>
         </Card>
       )}
     </div>
