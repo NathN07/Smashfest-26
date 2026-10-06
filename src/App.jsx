@@ -661,10 +661,31 @@ const LiveScoring = ({ matchId, onBack }) => {
   if (!match || !teamA || !teamB) return <div className="p-8 text-center text-slate-400">Match not found.</div>;
 
   const handleScore = (t, d) => setCurrentGame(p => ({ ...p, [t]: Math.max(0, p[t] + d) }));
+  
+  const handleNextGame = () => {
+    setScores([...scores, currentGame]);
+    setCurrentGame({ a: 0, b: 0 });
+  };
+
   const handleFinishMatch = () => {
     let fS = [...scores];
     if (currentGame.a > 0 || currentGame.b > 0) fS.push(currentGame);
-    const winnerLetter = getMatchWinner(fS, state.settings.bestOf, state.settings.pointsPerGame);
+    
+    let winnerLetter = getMatchWinner(fS, state.settings.bestOf, state.settings.pointsPerGame);
+    
+    // Failsafe: Agar galti se jaldi Complete daba diya, tab bhi jiske paas zyada sets ya points hain, woh jitega
+    if (!winnerLetter && fS.length > 0) {
+       let setsA = 0, setsB = 0, ptsA = 0, ptsB = 0;
+       fS.forEach(s => {
+          ptsA += s.a; ptsB += s.b;
+          if (s.a > s.b) setsA++; else if (s.b > s.a) setsB++;
+       });
+       if (setsA > setsB) winnerLetter = 'A';
+       else if (setsB > setsA) winnerLetter = 'B';
+       else if (ptsA > ptsB) winnerLetter = 'A';
+       else if (ptsB > ptsA) winnerLetter = 'B';
+    }
+
     dispatch({ type: 'UPDATE_MATCH', payload: { id: match.id, updates: { scores: fS, status: 'completed', winnerId: winnerLetter === 'A' ? teamA.id : winnerLetter === 'B' ? teamB.id : null } } });
     onBack();
   };
@@ -675,6 +696,17 @@ const LiveScoring = ({ matchId, onBack }) => {
         <button onClick={onBack} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300"><ArrowRight className="rotate-180" size={20} /></button>
         <h2 className="text-2xl font-bold text-white flex-1">Live Match Scoring</h2>
       </div>
+      
+      {scores.length > 0 && (
+        <div className="flex justify-center gap-3 mb-2">
+           {scores.map((s, idx) => (
+              <div key={idx} className="bg-slate-800/80 px-4 py-2 rounded-xl text-slate-300 font-bold border border-slate-700">
+                 Game {idx+1}: <span className="text-white">{s.a} - {s.b}</span>
+              </div>
+           ))}
+        </div>
+      )}
+
       <div className="grid md:grid-cols-2 gap-6">
         {[{t: teamA, key: 'a', color: 'emerald'}, {t: teamB, key: 'b', color: 'blue'}].map(({t, key, color}) => (
           <div key={key} className="bg-slate-900 border-2 border-slate-800 rounded-3xl p-6 flex flex-col items-center">
@@ -691,7 +723,10 @@ const LiveScoring = ({ matchId, onBack }) => {
           </div>
         ))}
       </div>
-      <Button onClick={handleFinishMatch} variant="primary" className="w-full py-4 text-lg bg-emerald-600 text-white">Complete Match</Button>
+      <div className="flex gap-4 mt-4 pt-4 border-t border-slate-800">
+        <Button onClick={handleNextGame} variant="secondary" className="flex-1 py-4 text-lg bg-slate-800 text-slate-300">Next Game (Save Set)</Button>
+        <Button onClick={handleFinishMatch} variant="primary" className="flex-[2] py-4 text-lg bg-emerald-600 text-white">Complete Match</Button>
+      </div>
     </div>
   );
 };
