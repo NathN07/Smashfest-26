@@ -1,7 +1,7 @@
 import React, { createContext, useReducer, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { 
   Trophy, Users, CalendarDays, LayoutDashboard, SettingsIcon, 
-  CheckCircle2, X, Plus, Edit2, Shield, ListOrdered,
+  CheckCircle2, X, Plus, Edit2, Shield,
   Swords, Activity, Trash2, RotateCcw, AlertTriangle, ArrowRight,
   UploadCloud, Medal, History, Check, Save, Zap, Lock, Unlock, User, Wifi, WifiOff
 } from 'lucide-react';
@@ -14,8 +14,8 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'smashfest-local-depl
 const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// Storage key updated to refresh browser cache for new Doubles format
-const LOCAL_STORAGE_KEY = 'smashfest_state_v24_doubles_final_spreadsheet'; 
+// Failsafe key to bypass any corrupted local cache completely
+const LOCAL_STORAGE_KEY = 'smashfest_state_v26_failsafe'; 
 
 let firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -36,8 +36,8 @@ const app = SYNC_ENABLED ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 
-// Fresh database slot for the new spreadsheet structure
-const stateDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'smashfest_final_v6', 'state');
+// Fresh path so no legacy data breaks the app
+const stateDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'smashfest_final_v7', 'state');
 
 const stableStringify = (v) => JSON.stringify(v, (k, val) =>
   val && typeof val === 'object' && !Array.isArray(val)
@@ -73,22 +73,15 @@ const INITIAL_MATCHES = [
   D_MATCH_TEMPLATE('M01', 't1', 't8', 'M01 (06 Oct)'), D_MATCH_TEMPLATE('M02', 't7', 't9', 'M02 (06 Oct)'),
   D_MATCH_TEMPLATE('M03', 't2', 't11', 'M03 (07 Oct)'), D_MATCH_TEMPLATE('M04', 't4', 't10', 'M04 (07 Oct)'),
   D_MATCH_TEMPLATE('M05', 't3', 't12', 'M05 (08 Oct)'), D_MATCH_TEMPLATE('M06', 't5', 't6', 'M06 (09 Oct)'),
-  
   D_MATCH_TEMPLATE('M07', null, null, 'M07 (12 Oct)'), D_MATCH_TEMPLATE('M08', null, null, 'M08 (12 Oct)'),
   D_MATCH_TEMPLATE('M09', null, null, 'M09 (13 Oct)'),
-  
   D_MATCH_TEMPLATE('M10', null, null, 'M10 (12 Oct)'), D_MATCH_TEMPLATE('M11', null, null, 'M11 (13 Oct)'),
   D_MATCH_TEMPLATE('M12', null, null, 'M12 (13 Oct)'),
-  
   D_MATCH_TEMPLATE('M13', null, null, 'M13 (14 Oct)'), D_MATCH_TEMPLATE('M14', null, null, 'M14 (14 Oct)'),
   D_MATCH_TEMPLATE('M15', null, null, 'M15 (14 Oct)'),
-  
   D_MATCH_TEMPLATE('M16', null, null, 'M16 (14 Oct)'), D_MATCH_TEMPLATE('M17', null, null, 'M17 (14 Oct) - BYE'),
-  
   D_MATCH_TEMPLATE('M18', null, null, 'M18 (14 Oct)'), D_MATCH_TEMPLATE('M19', null, null, 'M19 (14 Oct)'),
-  
   D_MATCH_TEMPLATE('M20', null, null, 'M20 (15 Oct)'), D_MATCH_TEMPLATE('M21', null, null, 'M21 (15 Oct)'),
-  
   D_MATCH_TEMPLATE('M22', null, null, 'M22 (16 Oct) - GRAND FINAL'),
 ];
 
@@ -168,7 +161,7 @@ const getMatchWinner = (scores, bestOf, pointsPerGame) => {
   if (gamesA >= req) return 'A'; if (gamesB >= req) return 'B'; return null;
 };
 
-// --- SINGLES CASCADE LOGIC (Untouched) ---
+// --- CASCADE LOGICS ---
 const cascadeSingles = (matches, byeId) => {
   let nm = [...matches];
   const w = (id) => nm.find(m=>m.id===id)?.winnerId || null;
@@ -192,7 +185,6 @@ const cascadeSingles = (matches, byeId) => {
   return nm;
 };
 
-// --- NEW DOUBLES SPREADSHEET CASCADE LOGIC ---
 const cascadeDoubles = (matches) => {
   let nm = [...matches];
   const w = (id) => nm.find(m=>m.id===id)?.winnerId || null;
@@ -212,30 +204,27 @@ const cascadeDoubles = (matches) => {
   set('M15', l('M09'), w('M12'));
 
   set('M16', w('M13'), w('M14'));
-  
-  // M17 has a BYE, so Winner 15 naturally advances.
   set('M17', w('M15'), null);
-
-  // M18 is W16 vs W17 (which is effectively W15 because of BYE)
   set('M18', w('M16'), w('M17') || w('M15'));
-
-  // M19 needs Upper Bracket Finalist, leaving it undefined so SuperAdmin can select
   set('M19', undefined, w('M18'));
-
-  // M20 and M21 are fully manual assigned by SuperAdmin (Upper Bracket Finalist vs Finalist)
-  // set('M20', undefined, undefined);
-  // set('M21', undefined, undefined);
-
-  // Grand Final
   set('M22', w('M20'), w('M21')); 
   return nm;
 };
 
 const tournamentReducer = (state, action) => {
   switch (action.type) {
-    case 'LOAD': return { ...INITIAL_STATE, ...action.payload };
+    case 'LOAD': 
+      // Failsafe merge: If any list is missing from a corrupted cloud backup, fallback to INITIAL_STATE safely
+      return { 
+        ...INITIAL_STATE, 
+        ...action.payload,
+        teams: action.payload.teams || INITIAL_TEAMS,
+        matches: action.payload.matches || INITIAL_MATCHES,
+        singlesTeams: action.payload.singlesTeams || INITIAL_SINGLES_PLAYERS,
+        singlesMatches: action.payload.singlesMatches || INITIAL_SINGLES_MATCHES
+      };
     case 'UPDATE_MATCH': {
-      let newM = state.matches.map(m => m.id === action.payload.id ? { ...m, ...action.payload.updates } : m);
+      let newM = (state.matches || []).map(m => m.id === action.payload.id ? { ...m, ...action.payload.updates } : m);
       newM = cascadeDoubles(newM);
       return { ...state, matches: newM };
     }
@@ -245,10 +234,10 @@ const tournamentReducer = (state, action) => {
         teamAId: action.payload.teamAId || null, teamBId: action.payload.teamBId || null,
         status: 'upcoming', scores: [], winnerId: null
       };
-      return { ...state, matches: [...state.matches, newMatch] };
+      return { ...state, matches: [...(state.matches || []), newMatch] };
     }
     case 'UPDATE_SINGLES_MATCH': {
-      let newSm = state.singlesMatches.map(m => m.id === action.payload.id ? { ...m, ...action.payload.updates } : m);
+      let newSm = (state.singlesMatches || []).map(m => m.id === action.payload.id ? { ...m, ...action.payload.updates } : m);
       newSm = cascadeSingles(newSm, state.singlesByeId);
       return { ...state, singlesMatches: newSm };
     }
@@ -258,18 +247,18 @@ const tournamentReducer = (state, action) => {
         teamAId: action.payload.teamAId || null, teamBId: action.payload.teamBId || null,
         status: 'upcoming', scores: [], winnerId: null
       };
-      return { ...state, singlesMatches: [...state.singlesMatches, newMatch] };
+      return { ...state, singlesMatches: [...(state.singlesMatches || []), newMatch] };
     }
     case 'UPDATE_SINGLES_TEAM': {
-      return { ...state, singlesTeams: state.singlesTeams.map(t => t.id === action.payload.id ? action.payload : t) };
+      return { ...state, singlesTeams: (state.singlesTeams || []).map(t => t.id === action.payload.id ? action.payload : t) };
     }
     case 'SET_SINGLES_BYE': {
-      let newSm = cascadeSingles(state.singlesMatches, action.payload);
+      let newSm = cascadeSingles((state.singlesMatches || []), action.payload);
       return { ...state, singlesByeId: action.payload, singlesMatches: newSm };
     }
-    case 'UPDATE_TEAM': return { ...state, teams: state.teams.map(t => t.id === action.payload.id ? action.payload : t) };
-    case 'ADD_TEAM': return { ...state, teams: [...state.teams, { id: crypto.randomUUID(), ...action.payload }] };
-    case 'DELETE_TEAM': return { ...state, teams: state.teams.filter(t => t.id !== action.payload) };
+    case 'UPDATE_TEAM': return { ...state, teams: (state.teams || []).map(t => t.id === action.payload.id ? action.payload : t) };
+    case 'ADD_TEAM': return { ...state, teams: [...(state.teams || []), { id: crypto.randomUUID(), ...action.payload }] };
+    case 'DELETE_TEAM': return { ...state, teams: (state.teams || []).filter(t => t.id !== action.payload) };
     case 'RESET_ALL': return INITIAL_STATE;
     default: return state;
   }
@@ -405,7 +394,7 @@ const SinglesPlayers = () => {
         </div>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {state.singlesTeams.map(p => (
+        {(state.singlesTeams || []).map(p => (
           <Card key={p.id} className="relative group hover:border-slate-600 transition-colors">
             {isSuperAdmin && (
               <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -444,12 +433,12 @@ const SinglesBracket = ({ onNavigate }) => {
   const [editingSM, setEditingSM] = useState(null);
   const [addingMatch, setAddingMatch] = useState(false);
   const dialog = useDialog();
-  const getS = (matchIds) => matchIds.map(id => state.singlesMatches.find(m => m.id === id));
+  const getS = (matchIds) => matchIds.map(id => (state.singlesMatches || []).find(m => m.id === id));
   
   const MatchBox = ({ match, indicatorColor }) => {
     if (!match) return null;
-    const tA = state.singlesTeams.find(t => t.id === match.teamAId);
-    const tB = state.singlesTeams.find(t => t.id === match.teamBId);
+    const tA = (state.singlesTeams || []).find(t => t.id === match.teamAId);
+    const tB = (state.singlesTeams || []).find(t => t.id === match.teamBId);
     return (
       <Card className={`relative w-72 border-slate-800/80 group ${indicatorColor ? `border-l-2 ${indicatorColor}` : ''}`}>
         <div className="flex justify-between items-center mb-3">
@@ -488,9 +477,9 @@ const SinglesBracket = ({ onNavigate }) => {
   };
 
   const ByePanel = () => {
-    const w7w = state.singlesTeams.find(t => t.id === state.singlesMatches.find(m=>m.id==='W7')?.winnerId);
-    const w8w = state.singlesTeams.find(t => t.id === state.singlesMatches.find(m=>m.id==='W8')?.winnerId);
-    const w9w = state.singlesTeams.find(t => t.id === state.singlesMatches.find(m=>m.id==='W9')?.winnerId);
+    const w7w = (state.singlesTeams || []).find(t => t.id === (state.singlesMatches || []).find(m=>m.id==='W7')?.winnerId);
+    const w8w = (state.singlesTeams || []).find(t => t.id === (state.singlesMatches || []).find(m=>m.id==='W8')?.winnerId);
+    const w9w = (state.singlesTeams || []).find(t => t.id === (state.singlesMatches || []).find(m=>m.id==='W9')?.winnerId);
     const ready = w7w && w8w && w9w;
 
     return (
@@ -502,7 +491,7 @@ const SinglesBracket = ({ onNavigate }) => {
           <div>
             <p className="text-slate-400 text-sm mb-4">Select which of the final 3 Winner-Side players gets a direct BYE to the Semifinal (SF1).</p>
             <div className="flex gap-4">
-              {[w7w, w8w, w9w].map(t => (
+              {[w7w, w8w, w9w].filter(Boolean).map(t => (
                 <button key={t.id} onClick={() => isAdmin && dispatch({ type: 'SET_SINGLES_BYE', payload: t.id })}
                   className={`flex-1 p-4 rounded-xl border transition-all font-bold ${state.singlesByeId === t.id ? 'border-yellow-500 bg-yellow-500/20 text-yellow-400' : 'border-slate-800 bg-[#050505] text-slate-400 hover:border-slate-600'}`}
                 >
@@ -517,7 +506,7 @@ const SinglesBracket = ({ onNavigate }) => {
     );
   };
 
-  const customMatches = state.singlesMatches.filter(m => m.id.startsWith('custom_'));
+  const customMatches = (state.singlesMatches || []).filter(m => m.id.startsWith('custom_'));
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -536,25 +525,26 @@ const SinglesBracket = ({ onNavigate }) => {
       <div className="overflow-x-auto pb-12">
         <div className="min-w-max flex gap-8">
           {tab === 'winner' && (
-            <><div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Round 1 (24 Players)</div>{getS(['M1','M2','M3','M4','M5','M6','M7','M8','M9','M10','M11','M12']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-emerald-500" />)}</div>
-              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Winner Side R1</div>{getS(['W1','W2','W3','W4','W5','W6']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-emerald-500" />)}</div>
-              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Winner Side R2 (Final 6)</div>{getS(['W7','W8','W9']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-emerald-500" />)}</div></>
+            <><div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Round 1 (24 Players)</div>{getS(['M1','M2','M3','M4','M5','M6','M7','M8','M9','M10','M11','M12']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-emerald-500" />)}</div>
+              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Winner Side R1</div>{getS(['W1','W2','W3','W4','W5','W6']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-emerald-500" />)}</div>
+              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Winner Side R2 (Final 6)</div>{getS(['W7','W8','W9']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-emerald-500" />)}</div></>
           )}
           {tab === 'loser' && (
-            <><div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Loser Side R1</div>{getS(['L1','L2','L3','L4','L5','L6']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-orange-500" />)}</div>
-              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Lower Merge</div>{getS(['L7','L8','L9','L10','L11','L12']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-orange-500" />)}</div>
-              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Lower Side R3</div>{getS(['L13','L14','L15']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-orange-500" />)}</div></>
+            <><div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Loser Side R1</div>{getS(['L1','L2','L3','L4','L5','L6']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-orange-500" />)}</div>
+              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Lower Merge</div>{getS(['L7','L8','L9','L10','L11','L12']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-orange-500" />)}</div>
+              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Lower Side R3</div>{getS(['L13','L14','L15']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-orange-500" />)}</div></>
           )}
           {tab === 'finals' && (
             <div className="w-full flex flex-col gap-8 items-start"><ByePanel />
               <div className="flex gap-12 items-center w-full">
                 <div className="flex flex-col gap-12">
-                   <div><div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2">Final Winner Stage</div><MatchBox match={getS(['W10'])[0]} indicatorColor="border-l-yellow-500" /></div>
-                   <div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-red-500 tracking-widest uppercase mb-2">Loser Pool</div>{getS(['L16','L17']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-red-500" />)}</div>
+                   <div><div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2">Final Winner Stage</div>{getS(['W10']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-yellow-500" />)}</div>
+                   <div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-red-500 tracking-widest uppercase mb-2">Loser Pool</div>{getS(['L16','L17']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-red-500" />)}</div>
                 </div>
-                <div className="flex flex-col gap-12 justify-center h-full border-l border-slate-800/50 pl-12 relative"><div className="text-[10px] font-bold text-purple-500 tracking-widest uppercase mb-2 absolute top-0 -mt-6">Semifinals</div>{getS(['SF1','SF2']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-purple-500" />)}</div>
-                <div className="flex flex-col items-center justify-center h-full border-l border-slate-800/50 pl-12 relative"><Trophy className="text-yellow-500 mb-4 scale-150 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]"/><div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2 absolute -top-6">Grand Final</div><MatchBox match={getS(['GF'])[0]} indicatorColor="border-l-yellow-500" />
-                   {getS(['GF'])[0]?.winnerId && ( <div className="mt-8 text-center animate-in fade-in zoom-in"><div className="text-yellow-400 font-black text-xl uppercase tracking-widest">Singles Champion</div><div className="text-white font-bold text-lg mt-1">{state.singlesTeams.find(t=>t.id===getS(['GF'])[0].winnerId)?.player1}</div></div> )}
+                <div className="flex flex-col gap-12 justify-center h-full border-l border-slate-800/50 pl-12 relative"><div className="text-[10px] font-bold text-purple-500 tracking-widest uppercase mb-2 absolute top-0 -mt-6">Semifinals</div>{getS(['SF1','SF2']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-purple-500" />)}</div>
+                <div className="flex flex-col items-center justify-center h-full border-l border-slate-800/50 pl-12 relative"><Trophy className="text-yellow-500 mb-4 scale-150 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]"/><div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2 absolute -top-6">Grand Final</div>
+                   {getS(['GF']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-yellow-500" />)}
+                   {getS(['GF'])[0]?.winnerId && ( <div className="mt-8 text-center animate-in fade-in zoom-in"><div className="text-yellow-400 font-black text-xl uppercase tracking-widest">Singles Champion</div><div className="text-white font-bold text-lg mt-1">{(state.singlesTeams || []).find(t=>t.id===getS(['GF'])[0].winnerId)?.player1}</div></div> )}
                 </div>
               </div>
             </div>
@@ -562,7 +552,7 @@ const SinglesBracket = ({ onNavigate }) => {
           {tab === 'custom' && (
             <div className="flex flex-col gap-4">
               <div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2">Custom Matches</div>
-              {customMatches.map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-yellow-500" />)}
+              {customMatches.map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-yellow-500" />)}
             </div>
           )}
         </div>
@@ -581,11 +571,11 @@ const SinglesBracket = ({ onNavigate }) => {
              </div>
              <div>
                <label className="block text-xs font-bold text-slate-500 mb-1">Player 1</label>
-               <select name="teamAId" defaultValue={editingSM.teamAId||''} className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{state.singlesTeams.map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}</select>
+               <select name="teamAId" defaultValue={editingSM.teamAId||''} className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{(state.singlesTeams || []).map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}</select>
              </div>
              <div>
                <label className="block text-xs font-bold text-slate-500 mb-1">Player 2</label>
-               <select name="teamBId" defaultValue={editingSM.teamBId||''} className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{state.singlesTeams.map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}</select>
+               <select name="teamBId" defaultValue={editingSM.teamBId||''} className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{(state.singlesTeams || []).map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}</select>
              </div>
              <Button type="submit" className="w-full mt-4">Save Match</Button>
           </form>
@@ -600,8 +590,8 @@ const SinglesBracket = ({ onNavigate }) => {
             setAddingMatch(false); setTab('custom');
           }} className="space-y-4">
              <div><label className="block text-xs font-bold text-slate-500 mb-1">Match Title</label><input name="title" placeholder="e.g., Special Exhibition (17 Oct)" required className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white" /></div>
-             <div><label className="block text-xs font-bold text-slate-500 mb-1">Player 1</label><select name="teamAId" className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{state.singlesTeams.map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}</select></div>
-             <div><label className="block text-xs font-bold text-slate-500 mb-1">Player 2</label><select name="teamBId" className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{state.singlesTeams.map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}</select></div>
+             <div><label className="block text-xs font-bold text-slate-500 mb-1">Player 1</label><select name="teamAId" className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{(state.singlesTeams || []).map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}</select></div>
+             <div><label className="block text-xs font-bold text-slate-500 mb-1">Player 2</label><select name="teamBId" className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{(state.singlesTeams || []).map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}</select></div>
              <Button type="submit" className="w-full mt-4">Create Match</Button>
           </form>
         </Modal>
@@ -617,12 +607,12 @@ const DoublesBracket = ({ onNavigate }) => {
   const [editingDM, setEditingDM] = useState(null);
   const [addingMatch, setAddingMatch] = useState(false);
   const dialog = useDialog();
-  const getD = (matchIds) => matchIds.map(id => state.matches.find(m => m.id === id));
+  const getD = (matchIds) => matchIds.map(id => (state.matches || []).find(m => m.id === id));
   
   const MatchBox = ({ match, indicatorColor }) => {
     if (!match) return null;
-    const tA = state.teams.find(t => t.id === match.teamAId);
-    const tB = state.teams.find(t => t.id === match.teamBId);
+    const tA = (state.teams || []).find(t => t.id === match.teamAId);
+    const tB = (state.teams || []).find(t => t.id === match.teamBId);
     return (
       <Card className={`relative w-72 border-slate-800/80 group ${indicatorColor ? `border-l-2 ${indicatorColor}` : ''}`}>
         <div className="flex justify-between items-center mb-3">
@@ -660,7 +650,7 @@ const DoublesBracket = ({ onNavigate }) => {
     );
   };
 
-  const customMatches = state.matches.filter(m => m.id.startsWith('custom_d_'));
+  const customMatches = (state.matches || []).filter(m => m.id.startsWith('custom_d_'));
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -679,14 +669,14 @@ const DoublesBracket = ({ onNavigate }) => {
       <div className="overflow-x-auto pb-12">
         <div className="min-w-max flex gap-8">
           {tab === 'winner' && (
-            <><div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Round 1 (6 Matches)</div>{getD(['M01','M02','M03','M04','M05','M06']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-emerald-500" />)}</div>
-              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Upper Bracket (3 Matches)</div>{getD(['M07','M08','M09']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-emerald-500" />)}</div>
+            <><div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Round 1 (6 Matches)</div>{getD(['M01','M02','M03','M04','M05','M06']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-emerald-500" />)}</div>
+              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Upper Bracket (3 Matches)</div>{getD(['M07','M08','M09']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-emerald-500" />)}</div>
             </>
           )}
           {tab === 'loser' && (
-            <><div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Lower Bracket (3 Matches)</div>{getD(['M10','M11','M12']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-orange-500" />)}</div>
-              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Lower Bracket R2</div>{getD(['M13','M14','M15']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-orange-500" />)}</div>
-              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Lower Bracket R3</div>{getD(['M16','M17']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-orange-500" />)}</div>
+            <><div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Lower Bracket (3 Matches)</div>{getD(['M10','M11','M12']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-orange-500" />)}</div>
+              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Lower Bracket R2</div>{getD(['M13','M14','M15']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-orange-500" />)}</div>
+              <div className="flex flex-col justify-around gap-4"><div className="text-[10px] font-bold text-orange-500 tracking-widest uppercase mb-2">Lower Bracket R3</div>{getD(['M16','M17']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-orange-500" />)}</div>
             </>
           )}
           {tab === 'finals' && (
@@ -698,17 +688,17 @@ const DoublesBracket = ({ onNavigate }) => {
               <div className="flex gap-12 items-center w-full">
                 <div className="flex flex-col gap-12 justify-center h-full relative">
                   <div className="text-[10px] font-bold text-purple-500 tracking-widest uppercase mb-2 absolute top-0 -mt-6">Semifinal Qualifiers</div>
-                  {getD(['M18', 'M19']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-purple-500" />)}
+                  {getD(['M18', 'M19']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-purple-500" />)}
                 </div>
                 <div className="flex flex-col gap-12 justify-center h-full relative border-l border-slate-800/50 pl-12">
                   <div className="text-[10px] font-bold text-purple-500 tracking-widest uppercase mb-2 absolute top-0 -mt-6">Semifinals</div>
-                  {getD(['M20', 'M21']).map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-purple-500" />)}
+                  {getD(['M20', 'M21']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-purple-500" />)}
                 </div>
                 <div className="flex flex-col items-center justify-center h-full border-l border-slate-800/50 pl-12 relative">
                   <Trophy className="text-yellow-500 mb-4 scale-150 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]"/>
                   <div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2 absolute -top-6">Grand Final</div>
-                  <MatchBox match={getD(['M22'])[0]} indicatorColor="border-l-yellow-500" />
-                   {getD(['M22'])[0]?.winnerId && ( <div className="mt-8 text-center animate-in fade-in zoom-in"><div className="text-yellow-400 font-black text-xl uppercase tracking-widest">Doubles Champion</div><div className="text-white font-bold text-lg mt-1">{state.teams.find(t=>t.id===getD(['M22'])[0].winnerId)?.player1} & {state.teams.find(t=>t.id===getD(['M22'])[0].winnerId)?.player2}</div></div> )}
+                  {getD(['M22']).filter(Boolean).map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-yellow-500" />)}
+                   {getD(['M22'])[0]?.winnerId && ( <div className="mt-8 text-center animate-in fade-in zoom-in"><div className="text-yellow-400 font-black text-xl uppercase tracking-widest">Doubles Champion</div><div className="text-white font-bold text-lg mt-1">{(state.teams || []).find(t=>t.id===getD(['M22'])[0].winnerId)?.player1} & {(state.teams || []).find(t=>t.id===getD(['M22'])[0].winnerId)?.player2}</div></div> )}
                 </div>
               </div>
             </div>
@@ -716,7 +706,7 @@ const DoublesBracket = ({ onNavigate }) => {
           {tab === 'custom' && (
             <div className="flex flex-col gap-4">
               <div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2">Custom Matches</div>
-              {customMatches.map(m => <MatchBox key={m.id} match={m} indicatorColor="border-l-yellow-500" />)}
+              {customMatches.map(m => <MatchBox key={m?.id || Math.random()} match={m} indicatorColor="border-l-yellow-500" />)}
             </div>
           )}
         </div>
@@ -735,11 +725,11 @@ const DoublesBracket = ({ onNavigate }) => {
              </div>
              <div>
                <label className="block text-xs font-bold text-slate-500 mb-1">Team 1</label>
-               <select name="teamAId" defaultValue={editingDM.teamAId||''} className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{state.teams.map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1} & {t.player2}</option>)}</select>
+               <select name="teamAId" defaultValue={editingDM.teamAId||''} className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{(state.teams || []).map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1} & {t.player2}</option>)}</select>
              </div>
              <div>
                <label className="block text-xs font-bold text-slate-500 mb-1">Team 2</label>
-               <select name="teamBId" defaultValue={editingDM.teamBId||''} className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{state.teams.map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1} & {t.player2}</option>)}</select>
+               <select name="teamBId" defaultValue={editingDM.teamBId||''} className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{(state.teams || []).map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1} & {t.player2}</option>)}</select>
              </div>
              <Button type="submit" className="w-full mt-4">Save Match</Button>
           </form>
@@ -754,8 +744,8 @@ const DoublesBracket = ({ onNavigate }) => {
             setAddingMatch(false); setTab('custom');
           }} className="space-y-4">
              <div><label className="block text-xs font-bold text-slate-500 mb-1">Match Title</label><input name="title" placeholder="e.g., Consolation Match" required className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white" /></div>
-             <div><label className="block text-xs font-bold text-slate-500 mb-1">Team 1</label><select name="teamAId" className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{state.teams.map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1} & {t.player2}</option>)}</select></div>
-             <div><label className="block text-xs font-bold text-slate-500 mb-1">Team 2</label><select name="teamBId" className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{state.teams.map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1} & {t.player2}</option>)}</select></div>
+             <div><label className="block text-xs font-bold text-slate-500 mb-1">Team 1</label><select name="teamAId" className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{(state.teams || []).map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1} & {t.player2}</option>)}</select></div>
+             <div><label className="block text-xs font-bold text-slate-500 mb-1">Team 2</label><select name="teamBId" className="w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white"><option value="">TBD</option>{(state.teams || []).map(t=><option key={t.id} value={t.id}>{t.code} - {t.player1} & {t.player2}</option>)}</select></div>
              <Button type="submit" className="w-full mt-4">Create Match</Button>
           </form>
         </Modal>
@@ -764,91 +754,11 @@ const DoublesBracket = ({ onNavigate }) => {
   );
 };
 
-const PointsTable = ({ mode }) => {
-  const { state } = useContext(TournamentContext);
-  const isSingles = mode === 'SINGLES';
-  const teams = isSingles ? state.singlesTeams : state.teams;
-  const matches = isSingles ? state.singlesMatches : state.matches;
-
-  const standings = useMemo(() => {
-    const stats = teams.reduce((acc, t) => {
-      acc[t.id] = { ...t, MP: 0, W: 0, L: 0, SW: 0, SL: 0, PTS: 0 };
-      return acc;
-    }, {});
-
-    matches.forEach(m => {
-      if (m.status === 'completed' && m.teamAId && m.teamBId) {
-        const a = m.teamAId; const b = m.teamBId;
-        if(!stats[a] || !stats[b]) return;
-        stats[a].MP++; stats[b].MP++;
-        let sa = 0, sb = 0;
-        m.scores.forEach(s => { if(s.a > s.b) sa++; else if(s.b > s.a) sb++; });
-        stats[a].SW += sa; stats[a].SL += sb;
-        stats[b].SW += sb; stats[b].SL += sa;
-
-        if (m.winnerId === a) { stats[a].W++; stats[b].L++; stats[a].PTS += 2; }
-        else if (m.winnerId === b) { stats[b].W++; stats[a].L++; stats[b].PTS += 2; }
-      }
-    });
-
-    return Object.values(stats).sort((a, b) => {
-      if (b.PTS !== a.PTS) return b.PTS - a.PTS;
-      if (b.W !== a.W) return b.W - a.W;
-      return (b.SW - b.SL) - (a.SW - a.SL);
-    });
-  }, [teams, matches]);
-
-  return (
-    <div className="space-y-6 animate-in fade-in">
-      <div>
-        <h2 className="text-2xl font-bold text-white uppercase tracking-wider">Points Table</h2>
-        <p className="text-slate-500 text-sm mt-1">{isSingles ? 'Singles Standings' : 'Doubles Standings'}</p>
-      </div>
-      <Card className="overflow-x-auto p-0 border-slate-800/80">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-[#050505] text-[10px] uppercase tracking-widest text-slate-500 border-b border-slate-800/80">
-              <th className="p-4 font-semibold w-12 text-center">Rank</th>
-              <th className="p-4 font-semibold">{isSingles ? 'Player' : 'Team'}</th>
-              <th className="p-4 font-semibold text-center hidden md:table-cell">Played</th>
-              <th className="p-4 font-semibold text-center text-emerald-500">W</th>
-              <th className="p-4 font-semibold text-center text-red-500">L</th>
-              <th className="p-4 font-semibold text-center hidden md:table-cell">Sets (W-L)</th>
-              <th className="p-4 font-semibold text-center text-yellow-500 text-lg">PTS</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/50">
-            {standings.map((team, idx) => (
-              <tr key={team.id} className="transition-colors hover:bg-slate-800/30">
-                <td className="p-4 text-center">
-                  {idx === 0 ? <span className="inline-flex w-6 h-6 items-center justify-center bg-yellow-500/20 text-yellow-500 rounded-full font-bold text-xs">1</span> :
-                   idx === 1 ? <span className="inline-flex w-6 h-6 items-center justify-center bg-slate-300/20 text-slate-300 rounded-full font-bold text-xs">2</span> :
-                   idx === 2 ? <span className="inline-flex w-6 h-6 items-center justify-center bg-orange-500/20 text-orange-400 rounded-full font-bold text-xs">3</span> :
-                   <span className="text-slate-600 font-bold">{idx + 1}</span>}
-                </td>
-                <td className="p-4">
-                  <div className="font-bold text-white text-sm">{team.code}</div>
-                  <div className="text-[11px] text-slate-500 whitespace-nowrap">{isSingles ? team.player1 : `${team.player1} & ${team.player2}`}</div>
-                </td>
-                <td className="p-4 text-center text-slate-400 hidden md:table-cell">{team.MP}</td>
-                <td className="p-4 text-center text-emerald-500 font-bold">{team.W}</td>
-                <td className="p-4 text-center text-red-500 font-bold">{team.L}</td>
-                <td className="p-4 text-center text-slate-400 text-xs hidden md:table-cell">{team.SW} - {team.SL}</td>
-                <td className="p-4 text-center font-black text-white text-xl">{team.PTS}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-    </div>
-  );
-};
-
 const LiveScoring = ({ matchId, isSingles, onBack }) => {
   const { state, dispatch } = useContext(TournamentContext);
-  const match = isSingles ? state.singlesMatches.find(m => m.id === matchId) : state.matches.find(m => m.id === matchId);
-  const teamA = isSingles ? state.singlesTeams.find(t => t.id === match?.teamAId) : state.teams.find(t => t.id === match?.teamAId);
-  const teamB = isSingles ? state.singlesTeams.find(t => t.id === match?.teamBId) : state.teams.find(t => t.id === match?.teamBId);
+  const match = isSingles ? (state.singlesMatches || []).find(m => m.id === matchId) : (state.matches || []).find(m => m.id === matchId);
+  const teamA = isSingles ? (state.singlesTeams || []).find(t => t.id === match?.teamAId) : (state.teams || []).find(t => t.id === match?.teamAId);
+  const teamB = isSingles ? (state.singlesTeams || []).find(t => t.id === match?.teamBId) : (state.teams || []).find(t => t.id === match?.teamBId);
 
   const [scores, setScores] = useState(match?.scores || []);
   const [currentGame, setCurrentGame] = useState(match?.liveGame || { a: 0, b: 0 });
@@ -926,18 +836,19 @@ const LiveScoring = ({ matchId, isSingles, onBack }) => {
 const Dashboard = ({ mode }) => {
   const { state } = useContext(TournamentContext);
   const isSingles = mode === 'SINGLES';
-  const m = isSingles ? state.singlesMatches : state.matches;
+  const m = isSingles ? (state.singlesMatches || []) : (state.matches || []);
+  const teamsList = isSingles ? (state.singlesTeams || []) : (state.teams || []);
   const total = m.length;
   const completed = m.filter(x => x.status === 'completed').length;
   const live = m.filter(x => x.status === 'live');
   
-  const todaysMatches = m.filter(match => match.title?.includes('6 Oct') && match.status !== 'live');
+  const todaysMatches = m.filter(match => match && match.title && match.title.includes('06 Oct') && match.status !== 'live');
   
   return (
     <div className="space-y-6 animate-in fade-in">
       <header className="mb-8"><h1 className="text-3xl font-black text-white tracking-tight uppercase">{state.settings.tournamentName}</h1><p className="text-slate-500 mt-1">Overview • {isSingles ? 'Singles VCT' : 'Doubles VCT'}</p></header>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="flex flex-col items-center text-center p-4"><Users className="text-blue-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{isSingles ? state.singlesTeams.length : state.teams.length}</span><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">{isSingles ? 'Players' : 'Teams'}</span></Card>
+        <Card className="flex flex-col items-center text-center p-4"><Users className="text-blue-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{teamsList.length}</span><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">{isSingles ? 'Players' : 'Teams'}</span></Card>
         <Card className="flex flex-col items-center text-center p-4"><CalendarDays className="text-purple-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{total}</span><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">Total Matches</span></Card>
         <Card className="flex flex-col items-center text-center p-4 border-emerald-500/20 bg-emerald-500/5"><CheckCircle2 className="text-emerald-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{completed}</span><span className="text-[10px] text-emerald-500/70 uppercase tracking-widest font-bold mt-1">Completed</span></Card>
         <Card className="flex flex-col items-center text-center p-4 border-yellow-500/20 bg-yellow-500/5">
@@ -951,14 +862,14 @@ const Dashboard = ({ mode }) => {
             <h3 className="text-sm font-bold text-red-500 uppercase tracking-widest mb-4 flex items-center gap-2"><Activity size={16}/> Active Live Match</h3>
             <div className="grid md:grid-cols-2 gap-4">
                {live.map(match => {
-                  const tA = isSingles ? state.singlesTeams.find(t=>t.id===match.teamAId) : state.teams.find(t=>t.id===match.teamAId);
-                  const tB = isSingles ? state.singlesTeams.find(t=>t.id===match.teamBId) : state.teams.find(t=>t.id===match.teamBId);
+                  const tA = isSingles ? (state.singlesTeams || []).find(t=>t.id===match.teamAId) : (state.teams || []).find(t=>t.id===match.teamAId);
+                  const tB = isSingles ? (state.singlesTeams || []).find(t=>t.id===match.teamBId) : (state.teams || []).find(t=>t.id===match.teamBId);
                   let currentGameScore = match.liveGame || {a:0, b:0};
-                  let setsA = match.scores.filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.a > s.b).length;
-                  let setsB = match.scores.filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.b > s.a).length;
+                  let setsA = (match.scores || []).filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.a > s.b).length;
+                  let setsB = (match.scores || []).filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.b > s.a).length;
                   
                   return (
-                     <Card key={match.id} className="border-red-500/50 bg-gradient-to-br from-[#1a0505] to-[#0a0000] shadow-[0_0_20px_rgba(239,68,68,0.15)]">
+                     <Card key={match?.id || Math.random()} className="border-red-500/50 bg-gradient-to-br from-[#1a0505] to-[#0a0000] shadow-[0_0_20px_rgba(239,68,68,0.15)]">
                         <div className="flex justify-between items-center mb-4 pb-3 border-b border-red-900/50">
                            <span className="text-[10px] font-black text-red-400 uppercase tracking-widest">{match.title}</span>
                            <span className="text-[9px] font-bold px-2 py-1 rounded bg-red-500 text-white uppercase tracking-widest animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]">LIVE NOW</span>
@@ -997,10 +908,10 @@ const Dashboard = ({ mode }) => {
            <h3 className="text-sm font-bold text-blue-400 uppercase tracking-widest mb-4 flex items-center gap-2"><CalendarDays size={16}/> Today's Schedule (Oct 6)</h3>
            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
              {todaysMatches.map(match => {
-               const tA = isSingles ? state.singlesTeams.find(t=>t.id===match.teamAId) : state.teams.find(t=>t.id===match.teamAId);
-               const tB = isSingles ? state.singlesTeams.find(t=>t.id===match.teamBId) : state.teams.find(t=>t.id===match.teamBId);
+               const tA = isSingles ? (state.singlesTeams || []).find(t=>t.id===match.teamAId) : (state.teams || []).find(t=>t.id===match.teamAId);
+               const tB = isSingles ? (state.singlesTeams || []).find(t=>t.id===match.teamBId) : (state.teams || []).find(t=>t.id===match.teamBId);
                return (
-                 <Card key={match.id} className={`border-l-4 ${match.status === 'completed' ? 'border-l-emerald-500' : 'border-l-blue-500'}`}>
+                 <Card key={match?.id || Math.random()} className={`border-l-4 ${match.status === 'completed' ? 'border-l-emerald-500' : 'border-l-blue-500'}`}>
                     <div className="flex justify-between items-center mb-3">
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{match.title}</span>
                       <span className={`text-[9px] font-bold px-2 py-1 rounded uppercase tracking-wider ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':'bg-slate-800/50 text-slate-500'}`}>{match.status}</span>
@@ -1016,6 +927,86 @@ const Dashboard = ({ mode }) => {
            </div>
         </div>
       )}
+    </div>
+  );
+};
+
+const PointsTable = ({ mode }) => {
+  const { state } = useContext(TournamentContext);
+  const isSingles = mode === 'SINGLES';
+  const teams = isSingles ? (state.singlesTeams || []) : (state.teams || []);
+  const matches = isSingles ? (state.singlesMatches || []) : (state.matches || []);
+
+  const standings = useMemo(() => {
+    const stats = teams.reduce((acc, t) => {
+      acc[t.id] = { ...t, MP: 0, W: 0, L: 0, SW: 0, SL: 0, PTS: 0 };
+      return acc;
+    }, {});
+
+    matches.forEach(m => {
+      if (m.status === 'completed' && m.teamAId && m.teamBId) {
+        const a = m.teamAId; const b = m.teamBId;
+        if(!stats[a] || !stats[b]) return;
+        stats[a].MP++; stats[b].MP++;
+        let sa = 0, sb = 0;
+        (m.scores || []).forEach(s => { if(s.a > s.b) sa++; else if(s.b > s.a) sb++; });
+        stats[a].SW += sa; stats[a].SL += sb;
+        stats[b].SW += sb; stats[b].SL += sa;
+
+        if (m.winnerId === a) { stats[a].W++; stats[b].L++; stats[a].PTS += 2; }
+        else if (m.winnerId === b) { stats[b].W++; stats[a].L++; stats[b].PTS += 2; }
+      }
+    });
+
+    return Object.values(stats).sort((a, b) => {
+      if (b.PTS !== a.PTS) return b.PTS - a.PTS;
+      if (b.W !== a.W) return b.W - a.W;
+      return (b.SW - b.SL) - (a.SW - a.SL);
+    });
+  }, [teams, matches]);
+
+  return (
+    <div className="space-y-6 animate-in fade-in">
+      <div>
+        <h2 className="text-2xl font-bold text-white uppercase tracking-wider">Points Table</h2>
+        <p className="text-slate-500 text-sm mt-1">{isSingles ? 'Singles Standings' : 'Doubles Standings'}</p>
+      </div>
+      <Card className="overflow-x-auto p-0 border-slate-800/80">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-[#050505] text-[10px] uppercase tracking-widest text-slate-500 border-b border-slate-800/80">
+              <th className="p-4 font-semibold w-12 text-center">Rank</th>
+              <th className="p-4 font-semibold">{isSingles ? 'Player' : 'Team'}</th>
+              <th className="p-4 font-semibold text-center hidden md:table-cell">Played</th>
+              <th className="p-4 font-semibold text-center text-emerald-500">W</th>
+              <th className="p-4 font-semibold text-center text-red-500">L</th>
+              <th className="p-4 font-semibold text-center hidden md:table-cell">Sets (W-L)</th>
+              <th className="p-4 font-semibold text-center text-yellow-500 text-lg">PTS</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/50">
+            {standings.map((team, idx) => (
+              <tr key={team.id} className="transition-colors hover:bg-slate-800/30">
+                <td className="p-4 text-center">
+                  {idx === 0 ? <span className="inline-flex w-6 h-6 items-center justify-center bg-yellow-500/20 text-yellow-500 rounded-full font-bold text-xs">1</span> :
+                   idx === 1 ? <span className="inline-flex w-6 h-6 items-center justify-center bg-slate-300/20 text-slate-300 rounded-full font-bold text-xs">2</span> :
+                   idx === 2 ? <span className="inline-flex w-6 h-6 items-center justify-center bg-orange-500/20 text-orange-400 rounded-full font-bold text-xs">3</span> :
+                   <span className="text-slate-600 font-bold">{idx + 1}</span>}
+                </td>
+                <td className="p-4">
+                  <div className="font-bold text-white text-sm">{team.code}</div>
+                  <div className="text-[11px] text-slate-500 whitespace-nowrap">{isSingles ? team.player1 : `${team.player1} & ${team.player2}`}</div>
+                </td>
+                <td className="p-4 text-center text-slate-400 hidden md:table-cell">{team.MP}</td>
+                <td className="p-4 text-center text-emerald-500 font-bold">{team.W}</td>
+                <td className="p-4 text-center text-red-500 font-bold">{team.L}</td>
+                <td className="p-4 text-center text-slate-400 text-xs hidden md:table-cell">{team.SW} - {team.SL}</td>
+                <td className="p-4 text-center font-black text-white text-xl">{team.PTS}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
     </div>
   );
 };
@@ -1046,34 +1037,6 @@ const Settings = () => {
   );
 }
 
-const HallOfFame = () => {
-  const { dbUser } = useContext(TournamentContext);
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    if (!SYNC_ENABLED || !dbUser) { setLoading(false); return; }
-    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'past_tournaments'));
-    const unsub = onSnapshot(q, (s) => { setHistory(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt)); setLoading(false); }, () => setLoading(false));
-    return unsub;
-  }, [dbUser]);
-
-  return (
-    <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in">
-      <header className="mb-8 text-center flex flex-col items-center"><Medal className="text-yellow-500 mb-4" size={48} /><h2 className="text-3xl font-black text-white uppercase">Hall of Fame</h2></header>
-      {loading ? <div className="text-center text-slate-600 font-mono tracking-widest text-xs py-12 animate-pulse">LOADING LEGENDS...</div> : history.length === 0 ? <Card className="text-center py-12 text-slate-600 font-mono tracking-widest text-xs uppercase border-dashed border-slate-800">No tournaments published yet.</Card> : (
-        <div className="grid gap-6">
-          {history.map(t => (
-             <div key={t.id} className="bg-gradient-to-r from-[#0a0a0a] to-[#050505] border border-slate-800 rounded-2xl p-6 shadow-xl flex justify-between items-center">
-               <div><div className="text-emerald-500 font-bold text-[10px] tracking-widest uppercase">{new Date(t.date).toLocaleDateString()}</div><h3 className="text-2xl font-black text-white uppercase">{t.tournamentName}</h3></div>
-               <div className="text-right"><div className="text-yellow-400 font-bold text-lg flex items-center justify-end gap-2"><Trophy size={16} /> {t.winner.code}</div><div className="text-slate-400 text-sm">{t.winner.p1} & {t.winner.p2}</div></div>
-             </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
 const AppLayout = () => {
   const { isAdmin, setIsAdmin, isSuperAdmin, setIsSuperAdmin } = useContext(TournamentContext);
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -1094,11 +1057,11 @@ const AppLayout = () => {
 
   const navGroups = mode === 'DOUBLES' ? [
     { label: 'MAIN', items: [{ id: 'dashboard', i: LayoutDashboard, l: 'Dashboard' }] },
-    { label: 'DOUBLES', items: [{ id: 'teams', i: Users, l: 'Teams (12)' }, { id: 'd_bracket', i: Swords, l: 'VCT Bracket' }, { id: 'points', i: ListOrdered, l: 'Points Table' }] },
+    { label: 'DOUBLES', items: [{ id: 'teams', i: Users, l: 'Teams (12)' }, { id: 'd_bracket', i: Swords, l: 'VCT Bracket' }, { id: 'points', i: Medal, l: 'Points Table' }] },
     { label: 'SYSTEM', items: [{ id: 'history', i: History, l: 'Hall of Fame' }, ...(isAdmin ? [{ id: 'settings', i: SettingsIcon, l: 'Settings' }] : [])] }
   ] : [
     { label: 'MAIN', items: [{ id: 'dashboard', i: LayoutDashboard, l: 'Dashboard' }] },
-    { label: 'SINGLES', items: [{ id: 's_players', i: User, l: 'Players (24)' }, { id: 's_bracket', i: Swords, l: 'VCT Bracket' }, { id: 'points', i: ListOrdered, l: 'Points Table' }] },
+    { label: 'SINGLES', items: [{ id: 's_players', i: User, l: 'Players (24)' }, { id: 's_bracket', i: Swords, l: 'VCT Bracket' }, { id: 'points', i: Medal, l: 'Points Table' }] },
     { label: 'SYSTEM', items: [{ id: 'history', i: History, l: 'Hall of Fame' }, ...(isAdmin ? [{ id: 'settings', i: SettingsIcon, l: 'Settings' }] : [])] }
   ];
 
