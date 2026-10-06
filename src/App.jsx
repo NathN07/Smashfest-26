@@ -1,7 +1,7 @@
 import React, { createContext, useReducer, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { 
   Trophy, Users, CalendarDays, LayoutDashboard, SettingsIcon, 
-  CheckCircle2, X, Plus, Edit2, Shield,
+  CheckCircle2, X, Plus, Edit2, Shield, ListOrdered,
   Swords, Activity, Trash2, RotateCcw, AlertTriangle, ArrowRight,
   Medal, History, Check, Save, Zap, Lock, Unlock, User, Wifi, WifiOff
 } from 'lucide-react';
@@ -14,8 +14,8 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'smashfest-local-depl
 const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// New local storage key to clear browser cache safely without touching cloud data
-const LOCAL_STORAGE_KEY = 'smashfest_state_v30_stable'; 
+// New key to clear frontend cache but KEEP cloud data
+const LOCAL_STORAGE_KEY = 'smashfest_state_v35_restore'; 
 
 let firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -36,8 +36,8 @@ const app = SYNC_ENABLED ? initializeApp(firebaseConfig) : null;
 const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 
-// PERFECTLY CONNECTED BACK TO YOUR ORIGINAL LIVE DATABASE TO SAVE YOUR SINGLES DATA
-const stateDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'live_tournament', 'state');
+// CONNECTED BACK TO V4: This is where your live data from 9:04 PM is safely stored!
+const stateDocRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'smashfest_final_v4', 'state');
 
 const stableStringify = (v) => JSON.stringify(v, (k, val) =>
   val && typeof val === 'object' && !Array.isArray(val)
@@ -49,7 +49,7 @@ const DEFAULT_SETTINGS = {
   pointsWin: 2, pointsLoss: 0, bestOf: 3, pointsPerGame: 11, tables: 2,
 };
 
-// --- DOUBLES DATA (12-TEAM SPREADSHEET FORMAT) ---
+// --- DOUBLES DATA (12-TEAM EXACT SPREADSHEET FORMAT) ---
 const INITIAL_TEAMS = [
   { id: 't1', code: '1', player1: 'Omm Prakash Lenka', player2: 'Shivam Singh', seed: 1 },
   { id: 't2', code: '2', player1: 'Himanshu Deb', player2: 'Ansh Pratap Ra', seed: 2 },
@@ -213,7 +213,7 @@ const cascadeDoubles = (matches) => {
   set('M16', w('M13'), w('M14'));
   set('M17', w('M15'), null);
   set('M18', w('M16'), w('M17') || w('M15'));
-  set('M19', null, w('M18')); // Upper Bracket Finalist vs M18 Winner
+  set('M19', null, w('M18')); 
   
   set('M22', w('M20'), w('M21')); 
   return nm;
@@ -222,22 +222,22 @@ const cascadeDoubles = (matches) => {
 const tournamentReducer = (state, action) => {
   switch (action.type) {
     case 'LOAD': {
-      // SMART MIGRATION: Keeps your Singles data 100% untouched, but gracefully overwrites the old Doubles format
       const incoming = action.payload || {};
       const mergedSinglesMatches = incoming.singlesMatches || state.singlesMatches || INITIAL_SINGLES_MATCHES;
       
       let mergedMatches = incoming.matches || INITIAL_MATCHES;
+      // Smart check: If cloud data has old 'm1' format instead of 'M01', upgrade it automatically
       const isOldFormat = mergedMatches.some(m => m.id === 'ko_qf1' || m.id === 'm1');
-      if (isOldFormat) mergedMatches = INITIAL_MATCHES; // Forces update to new M01-M22 format cleanly
+      if (isOldFormat) mergedMatches = INITIAL_MATCHES;
 
       return { 
         ...INITIAL_STATE, 
         ...incoming,
         settings: incoming.settings || DEFAULT_SETTINGS,
-        teams: incoming.teams || INITIAL_TEAMS,
-        matches: mergedMatches,
-        singlesTeams: incoming.singlesTeams || INITIAL_SINGLES_PLAYERS,
-        singlesMatches: mergedSinglesMatches
+        teams: INITIAL_TEAMS, // Ensures new doubles teams are forced
+        matches: mergedMatches, // Ensures M01-M22 format is forced
+        singlesTeams: incoming.singlesTeams || INITIAL_SINGLES_PLAYERS, // RETAINS YOUR REAL SINGLES DATA!
+        singlesMatches: mergedSinglesMatches // RETAINS YOUR COMPLETED MATCHES!
       };
     }
     case 'UPDATE_MATCH': {
@@ -523,7 +523,7 @@ const SinglesBracket = ({ onNavigate }) => {
     );
   };
 
-  const customMatches = (state.singlesMatches || []).filter(m => m.id.startsWith('custom_'));
+  const customMatches = (state.singlesMatches || []).filter(m => m.id && m.id.startsWith('custom_'));
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -667,7 +667,7 @@ const DoublesBracket = ({ onNavigate }) => {
     );
   };
 
-  const customMatches = (state.matches || []).filter(m => m.id.startsWith('custom_d_'));
+  const customMatches = (state.matches || []).filter(m => m.id && m.id.startsWith('custom_d_'));
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -856,8 +856,8 @@ const Dashboard = ({ mode }) => {
   const m = isSingles ? (state.singlesMatches || []) : (state.matches || []);
   const teamsList = isSingles ? (state.singlesTeams || []) : (state.teams || []);
   const total = m.length;
-  const completed = m.filter(x => x.status === 'completed').length;
-  const live = m.filter(x => x.status === 'live');
+  const completed = m.filter(x => x && x.status === 'completed').length;
+  const live = m.filter(x => x && x.status === 'live');
   
   const todaysMatches = m.filter(match => match && match.title && (match.title.includes('6 Oct') || match.title.includes('06 Oct')) && match.status !== 'live');
   
@@ -1053,46 +1053,6 @@ const Settings = () => {
     </div>
   );
 }
-
-const HallOfFame = () => {
-  const { dbUser } = useContext(TournamentContext);
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    if (!SYNC_ENABLED || !dbUser) { setLoading(false); return; }
-    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'past_tournaments'));
-    const unsub = onSnapshot(q, (s) => { setHistory(s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.createdAt - a.createdAt)); setLoading(false); }, () => setLoading(false));
-    return unsub;
-  }, [dbUser]);
-
-  return (
-    <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in">
-      <header className="mb-8 text-center flex flex-col items-center"><Medal className="text-yellow-500 mb-4" size={48} /><h2 className="text-3xl font-black text-white uppercase">Hall of Fame</h2></header>
-      {loading ? <div className="text-center text-slate-600 font-mono tracking-widest text-xs py-12 animate-pulse">LOADING LEGENDS...</div> : history.length === 0 ? <Card className="text-center py-12 text-slate-600 font-mono tracking-widest text-xs uppercase border-dashed border-slate-800">No tournaments published yet.</Card> : (
-        <div className="grid gap-6">
-          {history.map(t => (
-             <div key={t.id} className="bg-gradient-to-r from-[#0a0a0a] to-[#050505] border border-slate-800 rounded-2xl p-6 shadow-xl flex justify-between items-center">
-               <div><div className="text-emerald-500 font-bold text-[10px] tracking-widest uppercase">{new Date(t.date).toLocaleDateString()}</div><h3 className="text-2xl font-black text-white uppercase">{t.tournamentName}</h3></div>
-               <div className="text-right"><div className="text-yellow-400 font-bold text-lg flex items-center justify-end gap-2"><Trophy size={16} /> {t.winner.code}</div><div className="text-slate-400 text-sm">{t.winner.p1} & {t.winner.p2}</div></div>
-             </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const SyncBadge = () => {
-  const { syncStatus, isAdmin } = useContext(TournamentContext);
-  const map = {
-    live: { icon: Wifi, text: isAdmin ? 'Broadcasting live' : 'Live', cls: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' },
-    connecting: { icon: Wifi, text: 'Connecting...', cls: 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10 animate-pulse' },
-    error: { icon: WifiOff, text: 'Sync error', cls: 'text-red-400 border-red-500/30 bg-red-500/10' },
-    off: { icon: WifiOff, text: 'Offline mode', cls: 'text-slate-400 border-slate-700 bg-slate-800/50' },
-  }[syncStatus];
-  const Icon = map.icon;
-  return <div className={`fixed top-3 right-3 z-40 flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest backdrop-blur ${map.cls}`}><Icon size={12}/>{map.text}</div>;
-};
 
 const AppLayout = () => {
   const { isAdmin, setIsAdmin, isSuperAdmin, setIsSuperAdmin } = useContext(TournamentContext);
