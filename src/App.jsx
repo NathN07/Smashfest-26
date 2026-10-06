@@ -1,7 +1,7 @@
 import React, { createContext, useReducer, useContext, useEffect, useState, useMemo } from 'react';
 import { 
   Trophy, Users, CalendarDays, LayoutDashboard, SettingsIcon, 
-  Play, CheckCircle2, ChevronRight, X, Plus, Edit2, Shield,
+  CheckCircle2, X, Plus, Edit2, Shield,
   Swords, Activity, Trash2, RotateCcw, AlertTriangle, ArrowRight,
   UploadCloud, Medal, History, Check, Save, Zap, Lock, Unlock
 } from 'lucide-react';
@@ -14,7 +14,7 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'smashfest-local-depl
 const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-// Storage key changed to v6 to load the new Quarter-Finals structure
+// Storage key v6 to preserve current tournament data
 const LOCAL_STORAGE_KEY = 'smashfest_state_v6'; 
 
 let firebaseConfig = {
@@ -202,29 +202,48 @@ const tournamentReducer = (state, action) => {
     case 'DELETE_MATCH':
       return { ...state, matches: state.matches.filter(m => m.id !== action.payload) };
       
+    case 'SYNC_KNOCKOUTS': {
+      // Manual force sync of knockout brackets for self-healing
+      let newMatches = [...state.matches];
+      const getW = (mId) => newMatches.find(m => m.id === mId)?.winnerId || null;
+      
+      newMatches = newMatches.map(m => {
+        if (m.id === 'ko_sf1') return { ...m, teamAId: getW('ko_qf1') || m.teamAId, teamBId: getW('ko_qf2') || m.teamBId };
+        if (m.id === 'ko_sf2') return { ...m, teamAId: getW('ko_qf3') || m.teamAId, teamBId: getW('ko_qf4') || m.teamBId };
+        return m;
+      });
+      newMatches = newMatches.map(m => {
+        if (m.id === 'ko_final') return { ...m, teamAId: getW('ko_sf1') || m.teamAId, teamBId: getW('ko_sf2') || m.teamBId };
+        return m;
+      });
+      return { ...state, matches: newMatches };
+    }
+
     case 'UPDATE_MATCH': {
       const { id, updates } = action.payload;
       let newMatches = state.matches.map(m => m.id === id ? { ...m, ...updates } : m);
 
       // AUTO PROGRESSION QF -> SF -> GRAND FINAL
-      if (updates.status === 'completed' && updates.winnerId) {
-        if (id.startsWith('ko_qf')) {
-           const qf1Winner = newMatches.find(m => m.id === 'ko_qf1')?.winnerId || null;
-           const qf2Winner = newMatches.find(m => m.id === 'ko_qf2')?.winnerId || null;
-           const qf3Winner = newMatches.find(m => m.id === 'ko_qf3')?.winnerId || null;
-           const qf4Winner = newMatches.find(m => m.id === 'ko_qf4')?.winnerId || null;
+      // Cascades only if a Prerequisite match was updated to prevent overwriting manual SuperAdmin edits.
+      if (id.startsWith('ko_qf') && updates.hasOwnProperty('winnerId')) {
+           const qf1W = newMatches.find(m => m.id === 'ko_qf1')?.winnerId || null;
+           const qf2W = newMatches.find(m => m.id === 'ko_qf2')?.winnerId || null;
+           const qf3W = newMatches.find(m => m.id === 'ko_qf3')?.winnerId || null;
+           const qf4W = newMatches.find(m => m.id === 'ko_qf4')?.winnerId || null;
            
            newMatches = newMatches.map(m => {
-             if (m.id === 'ko_sf1') return { ...m, teamAId: qf1Winner, teamBId: qf2Winner };
-             if (m.id === 'ko_sf2') return { ...m, teamAId: qf3Winner, teamBId: qf4Winner };
+             if (m.id === 'ko_sf1') return { ...m, teamAId: qf1W !== null ? qf1W : m.teamAId, teamBId: qf2W !== null ? qf2W : m.teamBId };
+             if (m.id === 'ko_sf2') return { ...m, teamAId: qf3W !== null ? qf3W : m.teamAId, teamBId: qf4W !== null ? qf4W : m.teamBId };
              return m;
            });
-        }
-        else if (id === 'ko_sf1' || id === 'ko_sf2') {
-           const sf1Winner = newMatches.find(m => m.id === 'ko_sf1')?.winnerId || null;
-           const sf2Winner = newMatches.find(m => m.id === 'ko_sf2')?.winnerId || null;
-           newMatches = newMatches.map(m => m.id === 'ko_final' ? { ...m, teamAId: sf1Winner, teamBId: sf2Winner } : m);
-        }
+      }
+      else if (id.startsWith('ko_sf') && updates.hasOwnProperty('winnerId')) {
+           const sf1W = newMatches.find(m => m.id === 'ko_sf1')?.winnerId || null;
+           const sf2W = newMatches.find(m => m.id === 'ko_sf2')?.winnerId || null;
+           newMatches = newMatches.map(m => {
+              if (m.id === 'ko_final') return { ...m, teamAId: sf1W !== null ? sf1W : m.teamAId, teamBId: sf2W !== null ? sf2W : m.teamBId };
+              return m;
+           });
       }
       return { ...state, matches: newMatches };
     }
@@ -304,7 +323,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between p-4 border-b border-slate-800">
           <h3 className="text-lg font-bold text-white">{title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
         </div>
         <div className="p-6">{children}</div>
       </div>
@@ -430,7 +449,7 @@ const Fixtures = ({ onNavigate }) => {
                       
                       <div className="flex items-center gap-2">
                         {isSuperAdmin && (
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-slate-900 p-1 rounded-lg border border-slate-700">
                             {m.status !== 'upcoming' && (
                                <button onClick={(e) => { e.stopPropagation(); dialog.confirm("Reset Match?", "Clear scores and winner?", () => dispatch({type: 'RESET_MATCH', payload: m.id}), true) }} className="p-1 bg-red-900/40 hover:bg-red-900/60 text-red-400 rounded" title="Reset Score"><RotateCcw size={14}/></button>
                             )}
@@ -466,7 +485,7 @@ const Fixtures = ({ onNavigate }) => {
                         <Button className="flex-1 text-xs py-1.5" variant={m.status === 'live' ? 'primary' : 'secondary'} onClick={() => {
                             if(m.status === 'upcoming') dispatch({ type: 'UPDATE_MATCH', payload: { id: m.id, updates: { status: 'live' } }});
                             onNavigate('live', m.id);
-                          }}>{m.status === 'live' ? 'Resume Scoring' : 'Live'}</Button>
+                          }}>{m.status === 'live' ? 'Resume Scoring' : 'Live Scoring'}</Button>
                       </div>
                     )}
                   </Card>
@@ -538,6 +557,7 @@ const Fixtures = ({ onNavigate }) => {
 const KnockoutBracket = ({ onNavigate }) => {
   const { state, dispatch, dbUser, isAdmin, isSuperAdmin } = useContext(TournamentContext);
   const dialog = useDialog();
+  const [editingMatch, setEditingMatch] = useState(null);
   
   const handleQualify = () => {
     const stA = calculateGroupStandings(state.teams.filter(t=>t.group==='A'), state.matches, state.settings);
@@ -576,7 +596,7 @@ const KnockoutBracket = ({ onNavigate }) => {
     const isClickable = match.teamAId && match.teamBId;
 
     return (
-      <Card className="relative overflow-hidden w-64 lg:w-72 border-slate-700/50 shadow-xl bg-slate-900/90 backdrop-blur">
+      <Card className="relative overflow-hidden w-64 lg:w-72 border-slate-700/50 shadow-xl bg-slate-900/90 backdrop-blur group">
         {match.status === 'live' && <div className="absolute top-0 left-0 w-1 h-full bg-red-500 animate-pulse"></div>}
         {match.status === 'completed' && <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500"></div>}
         
@@ -586,10 +606,17 @@ const KnockoutBracket = ({ onNavigate }) => {
             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':match.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800 text-slate-400'}`}>
               {match.status}
             </span>
-            {isSuperAdmin && match.status !== 'upcoming' && (
-              <button onClick={(e) => { e.stopPropagation(); dialog.confirm("Reset Match?", "Clear scores?", () => dispatch({type: 'RESET_MATCH', payload: match.id}), true) }} className="absolute -top-2 -right-8 p-1 bg-red-900/40 text-red-400 hover:bg-red-900/60 rounded opacity-0 group-hover:opacity-100 transition-opacity" title="Reset Score">
-                <RotateCcw size={14}/>
-              </button>
+            {isSuperAdmin && (
+              <div className="absolute -top-3 -right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20 bg-slate-900 p-1 rounded-lg border border-slate-700 shadow-xl">
+                {match.status !== 'upcoming' && (
+                  <button onClick={(e) => { e.stopPropagation(); dialog.confirm("Reset Match?", "Clear scores?", () => dispatch({type: 'RESET_MATCH', payload: match.id}), true) }} className="p-1.5 bg-red-900/40 text-red-400 hover:bg-red-900/60 rounded" title="Reset Score">
+                    <RotateCcw size={14}/>
+                  </button>
+                )}
+                <button onClick={(e) => { e.stopPropagation(); setEditingMatch(match); }} className="p-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 rounded" title="Edit Teams">
+                    <Edit2 size={14}/>
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -625,9 +652,16 @@ const KnockoutBracket = ({ onNavigate }) => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
         <h2 className="text-2xl font-bold text-white">Knockout Bracket</h2>
-        {isAdmin && <Button onClick={handleQualify} icon={Zap} variant="primary">Qualify Top 8</Button>}
+        <div className="flex gap-3">
+          {isSuperAdmin && (
+            <Button onClick={() => { dispatch({type: 'SYNC_KNOCKOUTS'}); dialog.alert("Synced", "Bracket teams have been automatically updated based on previous results!"); }} icon={RotateCcw} variant="secondary">
+              Auto-Fix Bracket
+            </Button>
+          )}
+          {isAdmin && <Button onClick={handleQualify} icon={Zap} variant="primary">Qualify Top 8</Button>}
+        </div>
       </div>
 
       <div className="overflow-x-auto pb-12">
@@ -666,6 +700,45 @@ const KnockoutBracket = ({ onNavigate }) => {
           
         </div>
       </div>
+
+      <Modal isOpen={!!editingMatch} onClose={() => setEditingMatch(null)} title="Override Knockout Teams">
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          dispatch({
+            type: 'UPDATE_MATCH',
+            payload: {
+              id: editingMatch.id,
+              updates: {
+                teamAId: fd.get('teamA') || null,
+                teamBId: fd.get('teamB') || null,
+              }
+            }
+          });
+          setEditingMatch(null);
+          dialog.alert("Success", "Knockout teams successfully overridden!");
+        }} className="space-y-4">
+          <p className="text-sm text-yellow-500 bg-yellow-500/10 p-3 rounded mb-4">Warning: Manually setting teams will bypass the automatic progression algorithm for this specific match.</p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1">Team 1</label>
+              <select name="teamA" defaultValue={editingMatch?.teamAId || ''} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white">
+                <option value="">TBD (To Be Decided)</option>
+                {state.teams.map(t => <option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-400 mb-1">Team 2</label>
+              <select name="teamB" defaultValue={editingMatch?.teamBId || ''} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-white">
+                <option value="">TBD (To Be Decided)</option>
+                {state.teams.map(t => <option key={t.id} value={t.id}>{t.code} - {t.player1}</option>)}
+              </select>
+            </div>
+          </div>
+          <Button type="submit" className="w-full mt-4">Save Override</Button>
+        </form>
+      </Modal>
+
     </div>
   );
 };
@@ -894,14 +967,7 @@ const AppLayout = () => {
       <Modal isOpen={showLogin} onClose={() => setShowLogin(false)} title="Administrator Login">
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <input 
-              type="password" 
-              placeholder="Enter admin or superadmin password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoFocus
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" 
-            />
+            <input type="password" placeholder="Enter admin or superadmin password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500" />
           </div>
           <Button type="submit" className="w-full py-3" variant="primary">Access Admin Panel</Button>
         </form>
