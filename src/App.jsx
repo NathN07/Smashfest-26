@@ -186,7 +186,8 @@ const INITIAL_SINGLES_MATCHES = RAW_SINGLES_MATCHES.map(normalizeSinglesMatch);
 const INITIAL_STATE = {
   teams: INITIAL_TEAMS, matches: INITIAL_MATCHES, settings: DEFAULT_SETTINGS,
   singlesTeams: INITIAL_SINGLES_PLAYERS, singlesMatches: INITIAL_SINGLES_MATCHES, singlesByeId: null,
-  doublesVersion: DOUBLES_VERSION
+  doublesVersion: DOUBLES_VERSION,
+  liveStreams: { SINGLES: '', DOUBLES: '' }
 };
 
 const checkGameWin = (scoreA, scoreB, pointsPerGame) => Math.max(scoreA, scoreB) >= pointsPerGame && Math.abs(scoreA - scoreB) >= 2;
@@ -294,6 +295,7 @@ const tournamentReducer = (state, action) => {
     case 'UPDATE_TEAM': return { ...state, teams: state.teams.map(t => t.id === action.payload.id ? action.payload : t) };
     case 'ADD_TEAM': return { ...state, teams: [...state.teams, { id: crypto.randomUUID(), ...action.payload }] };
     case 'DELETE_TEAM': return { ...state, teams: state.teams.filter(t => t.id !== action.payload) };
+    case 'SET_STREAM': return { ...state, liveStreams: { ...(state.liveStreams || {}), [action.payload.mode]: action.payload.url } };
     case 'RESET_ALL': return INITIAL_STATE;
     default: return state;
   }
@@ -1156,6 +1158,80 @@ const LiveScoring = ({ matchId, isSingles, onBack }) => {
   );
 };
 
+// ---------- YOUTUBE LIVE EMBED ----------
+const getYouTubeEmbed = (raw) => {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  const idRe = /^[A-Za-z0-9_-]{11}$/;
+  let id = null, channel = null;
+  if (idRe.test(s)) id = s;
+  else {
+    try {
+      const u = new URL(/^https?:\/\//i.test(s) ? s : `https://${s}`);
+      const host = u.hostname.replace(/^www\./, '').replace(/^m\./, '');
+      const parts = u.pathname.split('/').filter(Boolean);
+      if (host === 'youtu.be') id = parts[0];
+      else if (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com')) {
+        if (u.searchParams.get('v')) id = u.searchParams.get('v');
+        else if (parts[0] === 'embed' && parts[1] === 'live_stream') channel = u.searchParams.get('channel');
+        else if (['live', 'embed', 'shorts', 'v'].includes(parts[0]) && parts[1]) id = parts[1];
+        else if (parts[0] === 'channel' && parts[1]) channel = parts[1];
+      }
+    } catch (e) {}
+  }
+  const tail = 'autoplay=1&mute=1&rel=0&playsinline=1';
+  if (id && idRe.test(id)) return `https://www.youtube.com/embed/${id}?${tail}`;
+  if (channel && /^UC[A-Za-z0-9_-]{22}$/.test(channel)) return `https://www.youtube.com/embed/live_stream?channel=${channel}&${tail}`;
+  return null;
+};
+
+const LiveStream = ({ mode }) => {
+  const { state, dispatch, isAdmin } = useContext(TournamentContext);
+  const saved = (state.liveStreams && state.liveStreams[mode]) || '';
+  const [draft, setDraft] = useState(saved);
+  const [error, setError] = useState('');
+  useEffect(() => { setDraft(saved); setError(''); }, [saved, mode]);
+  const embed = getYouTubeEmbed(saved);
+  if (!embed && !isAdmin) return null;
+
+  const save = (e) => {
+    e.preventDefault();
+    const v = draft.trim();
+    if (v && !getYouTubeEmbed(v)) { setError('Valid YouTube video / live link daalo (youtube.com/watch?v=..., youtu.be/..., youtube.com/live/...)'); return; }
+    setError('');
+    dispatch({ type: 'SET_STREAM', payload: { mode, url: v } });
+  };
+
+  return (
+    <Reveal className="mt-8">
+      <Card className="sf-static p-4 sm:p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-bold text-red-400 uppercase tracking-widest flex items-center gap-2"><Activity size={16} className="animate-pulse"/> Live Stream • {mode === 'SINGLES' ? 'Singles' : 'Doubles'}</h3>
+          {embed && <span className="text-[9px] font-black px-2 py-1 rounded bg-red-500/10 text-red-500 uppercase tracking-widest animate-pulse">Live</span>}
+        </div>
+        {embed && (
+          <div className="relative w-full overflow-hidden rounded-xl border border-slate-800 bg-black" style={{ aspectRatio: '16 / 9' }}>
+            <iframe key={embed} src={embed} title={`${mode} live stream`} className="absolute inset-0 w-full h-full" frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
+          </div>
+        )}
+        {isAdmin && (
+          <form onSubmit={save} className={`${embed ? 'mt-4' : ''}`}>
+            <label className="block text-xs font-bold text-slate-500 mb-1">YouTube Live Link ({mode === 'SINGLES' ? 'Singles' : 'Doubles'})</label>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="https://www.youtube.com/watch?v=..." className="flex-1 bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white text-sm focus:outline-none focus:border-emerald-500" />
+              <Button type="submit">{embed ? 'Update' : 'Start Stream'}</Button>
+              {embed && <Button variant="danger" onClick={() => { setDraft(''); setError(''); dispatch({ type: 'SET_STREAM', payload: { mode, url: '' } }); }}>Remove</Button>}
+            </div>
+            {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
+            {!embed && <p className="text-slate-600 text-xs mt-2">Link save karte hi video sabke dashboard par start ho jaayega.</p>}
+          </form>
+        )}
+      </Card>
+    </Reveal>
+  );
+};
+
 const Dashboard = ({ mode, onNavigate }) => {
   const { state, dispatch, isAdmin } = useContext(TournamentContext);
   const isSingles = mode === 'SINGLES';
@@ -1224,6 +1300,8 @@ const Dashboard = ({ mode, onNavigate }) => {
            <CountUp className="text-3xl font-black text-white" value={live.length} /><span className="text-[10px] text-yellow-500/70 uppercase tracking-widest font-bold mt-1">Live Now</span>
         </Card>
       </div>
+
+      <LiveStream mode={mode} />
 
       {live.length > 0 && (
          <div className="mt-8 animate-in fade-in slide-in-from-bottom-4">
