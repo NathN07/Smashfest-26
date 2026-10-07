@@ -1,9 +1,9 @@
-import React, { createContext, useReducer, useContext, useEffect, useState, useRef } from 'react';
+import React, { createContext, useReducer, useContext, useEffect, useState, useRef, useMemo } from 'react';
 import {
   Trophy, Users, CalendarDays, LayoutDashboard, SettingsIcon,
   CheckCircle2, X, Plus, Edit2, Shield,
   Swords, Activity, Trash2, RotateCcw, AlertTriangle, ArrowRight,
-  Medal, History, Zap, Lock, Unlock, User, Wifi, WifiOff, ListOrdered
+  Medal, History, Zap, Lock, Unlock, User, Wifi, WifiOff, ListOrdered, ChevronUp
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
@@ -375,9 +375,137 @@ const TournamentProvider = ({ children }) => {
 const findEntrant = (state, isSingles, id) => (isSingles ? state.singlesTeams : state.teams).find(t => t.id === id);
 const entrantName = (t, isSingles) => t ? (isSingles ? t.player1 : `${t.player1} & ${t.player2}`) : 'TBD';
 
-const Card = ({ children, className = '', onClick }) => <div onClick={onClick} className={`bg-[#0a0a0a] border border-slate-800/60 rounded-xl p-6 shadow-sm ${className}`}>{children}</div>;
+// ---------- ANIMATION KIT (no extra libraries needed) ----------
+// Reveals an element with a smooth animation the first time it scrolls into view.
+const Reveal = ({ children, delay = 0, dir = 'up', className = '', threshold = 0.08, as: Tag = 'div' }) => {
+  const ref = useRef(null);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === 'undefined') { setShown(true); return; }
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) { setShown(true); io.disconnect(); } });
+    }, { threshold, rootMargin: '0px 0px -3% 0px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [threshold]);
+  const dirCls = dir === 'left' ? 'sf-left' : dir === 'right' ? 'sf-right' : dir === 'zoom' ? 'sf-zoom' : '';
+  return (
+    <Tag ref={ref} style={delay ? { '--d': `${delay}ms` } : undefined} className={`sf-reveal ${dirCls} ${shown ? 'sf-in' : ''} ${className}`}>
+      {children}
+    </Tag>
+  );
+};
+
+// Number that counts up when it scrolls into view (and animates again when the value changes).
+const CountUp = ({ value, className = '' }) => {
+  const ref = useRef(null);
+  const shown = useRef(0);
+  const [n, setN] = useState(0);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === 'undefined') { setSeen(true); return; }
+    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setSeen(true); io.disconnect(); } }, { threshold: 0.3 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!seen) return;
+    const from = shown.current, to = Number(value) || 0;
+    if (from === to) { setN(to); return; }
+    let raf; const t0 = performance.now(); const dur = 900;
+    const step = (t) => {
+      const p = Math.min(1, (t - t0) / dur);
+      const v = Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3)));
+      shown.current = v; setN(v);
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [seen, value]);
+  return <span ref={ref} className={className}>{n}</span>;
+};
+
+const STAGGER_CSS = Array.from({ length: 12 }, (_, i) => `.sf-root .flex-col > .sf-reveal:nth-child(${i + 2}){transition-delay:${Math.min(i * 60, 300)}ms}`).join('\n');
+
+const SF_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=swap');
+html .sf-root{font-family:'Inter',ui-sans-serif,system-ui,sans-serif}
+.sf-root h1,.sf-root h2,.sf-root h3{font-family:'Space Grotesk','Inter',ui-sans-serif,system-ui,sans-serif;letter-spacing:-0.01em}
+.sf-root *{scrollbar-width:thin;scrollbar-color:#27303f transparent}
+
+/* scroll reveal */
+.sf-reveal{opacity:0;transform:translateY(30px) scale(.98);transition:opacity .75s cubic-bezier(.2,.7,.2,1),transform .75s cubic-bezier(.2,.7,.2,1);transition-delay:var(--d,0ms);will-change:opacity,transform}
+.sf-reveal.sf-left{transform:translateX(-36px)}
+.sf-reveal.sf-right{transform:translateX(36px)}
+.sf-reveal.sf-zoom{transform:scale(.92)}
+.sf-reveal.sf-in{opacity:1;transform:none;will-change:auto}
+${STAGGER_CSS}
+
+/* cards, buttons */
+.sf-card{transition:transform .35s cubic-bezier(.2,.7,.2,1),filter .35s}
+.sf-card:hover{transform:translateY(-3px);filter:brightness(1.1)}
+.sf-card.sf-static:hover{transform:none;filter:none}
+.sf-btn{position:relative;overflow:hidden}
+.sf-btn::after{content:'';position:absolute;inset:0;background:linear-gradient(120deg,transparent 30%,rgba(255,255,255,.18) 50%,transparent 70%);transform:translateX(-120%);transition:transform .6s}
+.sf-btn:hover::after{transform:translateX(120%)}
+
+/* page + modal + rows */
+@keyframes sf-page{from{opacity:0;transform:translateY(12px)}}
+.sf-page{animation:sf-page .5s cubic-bezier(.2,.7,.2,1) backwards}
+@keyframes sf-pop{from{opacity:0;transform:scale(.92) translateY(14px)}}
+.sf-pop{animation:sf-pop .3s cubic-bezier(.2,.9,.3,1.15) backwards}
+@keyframes sf-fadein{from{opacity:0}}
+.sf-fade{animation:sf-fadein .22s backwards}
+@keyframes sf-row{from{opacity:0;transform:translateX(-22px)}}
+.sf-row{animation:sf-row .55s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:var(--d,0ms)}
+.sf-row:hover td{background:rgba(255,255,255,.03)}
+@keyframes sf-bump{0%{transform:scale(1.22);color:#34d399}100%{transform:scale(1)}}
+.sf-bump{animation:sf-bump .35s cubic-bezier(.2,.9,.3,1.2)}
+
+/* decorative */
+.sf-progress{position:fixed;top:0;left:0;right:0;height:3px;z-index:45;transform-origin:left;transform:scaleX(0);background:linear-gradient(90deg,#34d399,#facc15,#ef4444);box-shadow:0 0 12px rgba(52,211,153,.6);pointer-events:none}
+.sf-blobs{position:fixed;top:0;bottom:0;left:0;right:0;z-index:0;pointer-events:none;overflow:hidden;will-change:transform}
+.sf-blobs::before{content:'';position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:44px 44px;-webkit-mask-image:radial-gradient(ellipse at 50% 0%,#000 15%,transparent 75%);mask-image:radial-gradient(ellipse at 50% 0%,#000 15%,transparent 75%)}
+.sf-blobs span{position:absolute;border-radius:9999px}
+.sf-blobs span:nth-child(1){width:520px;height:520px;top:-120px;right:-80px;background:radial-gradient(circle,rgba(16,185,129,.18),transparent 65%);animation:sf-drift 18s ease-in-out infinite alternate}
+.sf-blobs span:nth-child(2){width:620px;height:620px;bottom:-220px;left:-120px;background:radial-gradient(circle,rgba(168,85,247,.14),transparent 65%);animation:sf-drift 22s ease-in-out infinite alternate-reverse}
+.sf-blobs span:nth-child(3){width:420px;height:420px;top:40%;left:55%;background:radial-gradient(circle,rgba(250,204,21,.08),transparent 65%);animation:sf-drift 26s ease-in-out infinite alternate}
+@keyframes sf-drift{from{transform:translate3d(0,0,0) scale(1)}to{transform:translate3d(60px,40px,0) scale(1.18)}}
+@media(min-width:768px){.sf-progress,.sf-blobs{left:16rem}}
+
+.sf-gradient-text{background:linear-gradient(90deg,#ffffff,#34d399,#facc15,#ffffff);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:sf-shimmer 9s linear infinite}
+@keyframes sf-shimmer{to{background-position:300% 0}}
+.sf-dot{display:inline-block;width:7px;height:7px;border-radius:9999px;background:#34d399;animation:sf-ping 2s infinite}
+@keyframes sf-ping{0%{box-shadow:0 0 0 0 rgba(52,211,153,.6)}100%{box-shadow:0 0 0 10px rgba(52,211,153,0)}}
+.sf-hero-line{height:2px;border-radius:2px;background:linear-gradient(90deg,#34d399,transparent);animation:sf-line 1.1s .3s cubic-bezier(.2,.7,.2,1) both}
+@keyframes sf-line{from{width:0}to{width:140px}}
+.sf-live-glow{animation:sf-live 2.2s ease-in-out infinite}
+@keyframes sf-live{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.0)}50%{box-shadow:0 0 26px 2px rgba(239,68,68,.28)}}
+.sf-trophy{animation:sf-trophy 3s ease-in-out infinite}
+@keyframes sf-trophy{0%,100%{filter:drop-shadow(0 0 8px rgba(250,204,21,.35))}50%{filter:drop-shadow(0 0 24px rgba(250,204,21,.85))}}
+.sf-float{animation:sf-float 4s ease-in-out infinite}
+@keyframes sf-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.sf-shield{filter:drop-shadow(0 0 8px rgba(220,38,38,.6))}
+.sf-nav-bar{position:absolute;left:0;top:22%;bottom:22%;width:3px;border-radius:3px;background:linear-gradient(#34d399,#facc15);animation:sf-bar .35s cubic-bezier(.2,.7,.2,1)}
+@keyframes sf-bar{from{transform:scaleY(0)}}
+
+@media (prefers-reduced-motion: reduce){
+  .sf-reveal{opacity:1!important;transform:none!important;transition:none!important}
+  .sf-root *,.sf-root *::before,.sf-root *::after{animation-duration:.01ms!important;animation-iteration-count:1!important}
+}
+`;
+const GlobalStyles = () => <style>{SF_CSS}</style>;
+
+const Card = ({ children, className = '', onClick, reveal = false, delay = 0 }) => {
+  const el = <div onClick={onClick} className={`sf-card bg-[#0a0a0a] border border-slate-800/60 rounded-xl p-6 shadow-sm ${reveal ? 'h-full' : ''} ${className}`}>{children}</div>;
+  return reveal ? <Reveal delay={delay} className="h-full">{el}</Reveal> : el;
+};
 const Button = ({ children, onClick, variant = 'primary', className = '', icon: Icon, type = "button", disabled=false }) => {
-  const base = "inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-all active:scale-95 disabled:opacity-50 text-sm";
+  const base = "sf-btn inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-all active:scale-95 disabled:opacity-50 text-sm";
   const variants = { primary: "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20", secondary: "bg-slate-800 hover:bg-slate-700 text-white border border-slate-700", danger: "bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20", };
   return <button type={type} onClick={onClick} disabled={disabled} className={`${base} ${variants[variant]} ${className}`}>{Icon && <Icon size={16} />}{children}</button>;
 };
@@ -385,8 +513,8 @@ const Button = ({ children, onClick, variant = 'primary', className = '', icon: 
 const Modal = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="bg-[#0a0a0a] border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in duration-200 max-h-[90vh] overflow-y-auto">
+    <div className="sf-fade fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+      <div className="sf-pop bg-[#0a0a0a] border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-4 border-b border-slate-800/50">
           <h3 className="text-sm font-bold text-white tracking-widest uppercase">{title}</h3>
           <button type="button" onClick={onClose} className="text-slate-400 hover:text-white p-1"><X size={20}/></button>
@@ -433,7 +561,7 @@ const MatchCard = ({ match, isSingles, indicatorColor, onNavigate, onEdit, full 
   const scoreB = (match.scores || []).filter(s => s.b > s.a).length;
 
   return (
-    <Card className={`relative ${full ? 'w-full' : 'w-72'} border-slate-800/80 group ${indicatorColor ? `border-l-2 ${indicatorColor}` : ''} ${isToday ? 'ring-1 ring-amber-400/60 shadow-[0_0_20px_rgba(251,191,36,0.15)]' : ''}`}>
+    <Card className={`relative ${full ? 'w-full' : 'w-72'} border-slate-800/80 group ${match.status === 'live' ? 'sf-live-glow' : ''} ${indicatorColor ? `border-l-2 ${indicatorColor}` : ''} ${isToday ? 'ring-1 ring-amber-400/60 shadow-[0_0_20px_rgba(251,191,36,0.15)]' : ''}`}>
       <div className="flex justify-between items-start mb-3 gap-2">
         <div>
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{match.title}{match.round ? <span className="text-slate-600"> • {match.round}</span> : null}</div>
@@ -617,7 +745,7 @@ const Standings = ({ mode }) => {
         <h2 className="text-2xl font-bold text-white uppercase tracking-wider">Standings</h2>
         <p className="text-slate-500 text-sm mt-1">{isSingles ? 'Singles' : 'Doubles'} Points Table • Win = {state.settings.pointsWin} pts, Loss = {state.settings.pointsLoss} pts</p>
       </div>
-      <Card className="p-0 overflow-hidden">
+      <Card reveal className="p-0 overflow-hidden sf-static">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
             <thead className="bg-[#050505] border-b border-slate-800">
@@ -635,7 +763,7 @@ const Standings = ({ mode }) => {
               {rows.map((r, i) => {
                 const out = r.l >= 2;
                 return (
-                  <tr key={r.t.id} className={`border-b border-slate-800/50 ${i < 3 && r.p > 0 ? 'bg-emerald-500/5' : ''} ${out ? 'opacity-50' : ''}`}>
+                  <tr key={r.t.id} style={{ '--d': `${Math.min(i, 14) * 45}ms` }} className={`sf-row border-b border-slate-800/50 ${i < 3 && r.p > 0 ? 'bg-emerald-500/5' : ''} ${out ? 'opacity-50' : ''}`}>
                     <td className="px-3 py-3 text-center font-black text-slate-400">{i + 1}</td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-3">
@@ -702,7 +830,11 @@ const Schedule = ({ mode, onNavigate }) => {
             <span className="text-[10px] text-slate-600 font-bold">{g.items.length} match{g.items.length > 1 ? 'es' : ''}</span>
           </div>
           <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            {g.items.map(m => <MatchCard key={m.id} match={m} isSingles={isSingles} full indicatorColor={m.custom ? 'border-l-blue-500' : 'border-l-slate-700'} onNavigate={onNavigate} onEdit={setEditing} />)}
+            {g.items.map((m, i) => (
+              <Reveal key={m.id} delay={Math.min(i, 5) * 70}>
+                <MatchCard match={m} isSingles={isSingles} full indicatorColor={m.custom ? 'border-l-blue-500' : 'border-l-slate-700'} onNavigate={onNavigate} onEdit={setEditing} />
+              </Reveal>
+            ))}
           </div>
         </div>
       ))}
@@ -726,8 +858,8 @@ const SinglesPlayers = () => {
         </div>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {state.singlesTeams.map(p => (
-          <Card key={p.id} className="relative group hover:border-slate-600 transition-colors">
+        {state.singlesTeams.map((p, i) => (
+          <Card key={p.id} reveal delay={(i % 8) * 60} className="relative group hover:border-slate-600 transition-colors">
             {isSuperAdmin && (
               <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button onClick={() => setEditing(p)} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"><Edit2 size={14}/></button>
@@ -765,7 +897,16 @@ const SinglesBracket = ({ onNavigate }) => {
   const [editingSM, setEditingSM] = useState(null);
   const getS = (matchIds) => matchIds.map(id => state.singlesMatches.find(m => m.id === id));
 
-  const MB = ({ match, indicatorColor }) => <MatchCard match={match} isSingles indicatorColor={indicatorColor} onNavigate={onNavigate} onEdit={setEditingSM} />;
+  // Stable component (so cards don't remount / re-animate on every score update)
+  const bracketRef = useRef({});
+  bracketRef.current = { onNavigate, onEdit: setEditingSM };
+  const MB = useMemo(() => ({ match, indicatorColor }) => (
+    <Reveal>
+      <MatchCard match={match} isSingles indicatorColor={indicatorColor}
+        onNavigate={(...a) => bracketRef.current.onNavigate && bracketRef.current.onNavigate(...a)}
+        onEdit={(m) => bracketRef.current.onEdit && bracketRef.current.onEdit(m)} />
+    </Reveal>
+  ), []);
 
   const ByePanel = () => {
     const w7w = state.singlesTeams.find(t => t.id === state.singlesMatches.find(m=>m.id==='W7')?.winnerId);
@@ -830,7 +971,7 @@ const SinglesBracket = ({ onNavigate }) => {
                    <div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-red-500 tracking-widest uppercase mb-2">Loser Pool</div>{getS(['L16','L17']).map(m => <MB key={m?.id} match={m} indicatorColor="border-l-red-500" />)}</div>
                 </div>
                 <div className="flex flex-col gap-12 justify-center h-full border-l border-slate-800/50 pl-12 relative"><div className="text-[10px] font-bold text-purple-500 tracking-widest uppercase mb-2 absolute top-0 -mt-6">Semifinals</div>{getS(['SF1','SF2']).map(m => <MB key={m?.id} match={m} indicatorColor="border-l-purple-500" />)}</div>
-                <div className="flex flex-col items-center justify-center h-full border-l border-slate-800/50 pl-12 relative"><Trophy className="text-yellow-500 mb-4 scale-150 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]"/><div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2 absolute -top-6">Grand Final</div><MB match={getS(['GF'])[0]} indicatorColor="border-l-yellow-500" />
+                <div className="flex flex-col items-center justify-center h-full border-l border-slate-800/50 pl-12 relative"><Trophy className="sf-trophy text-yellow-500 mb-4 scale-150"/><div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2 absolute -top-6">Grand Final</div><MB match={getS(['GF'])[0]} indicatorColor="border-l-yellow-500" />
                    {getS(['GF'])[0]?.winnerId && ( <div className="mt-8 text-center animate-in fade-in zoom-in"><div className="text-yellow-400 font-black text-xl uppercase tracking-widest">Singles Champion</div><div className="text-white font-bold text-lg mt-1">{state.singlesTeams.find(t=>t.id===getS(['GF'])[0].winnerId)?.player1}</div></div> )}
                 </div>
               </div>
@@ -850,7 +991,16 @@ const DoublesBracket = ({ onNavigate }) => {
   const [tab, setTab] = useState('winner');
   const [editingDM, setEditingDM] = useState(null);
   const getD = (matchIds) => matchIds.map(id => state.matches.find(m => m.id === id)).filter(Boolean);
-  const MB = ({ match, indicatorColor }) => <MatchCard match={match} isSingles={false} indicatorColor={indicatorColor} onNavigate={onNavigate} onEdit={setEditingDM} />;
+  // Stable component (so cards don't remount / re-animate on every score update)
+  const bracketRef = useRef({});
+  bracketRef.current = { onNavigate, onEdit: setEditingDM };
+  const MB = useMemo(() => ({ match, indicatorColor }) => (
+    <Reveal>
+      <MatchCard match={match} isSingles={false} indicatorColor={indicatorColor}
+        onNavigate={(...a) => bracketRef.current.onNavigate && bracketRef.current.onNavigate(...a)}
+        onEdit={(m) => bracketRef.current.onEdit && bracketRef.current.onEdit(m)} />
+    </Reveal>
+  ), []);
 
   // Manual semifinal slots (Upper Bracket Finalists etc.)
   const ubWinners = ['M07','M08','M09'].map(id => state.matches.find(m => m.id === id)?.winnerId).filter(Boolean).map(id => state.teams.find(t => t.id === id)).filter(Boolean);
@@ -913,7 +1063,7 @@ const DoublesBracket = ({ onNavigate }) => {
               <div className="flex gap-12 items-center w-full">
                 <div className="flex flex-col gap-4 justify-center"><div className="text-[10px] font-bold text-pink-500 tracking-widest uppercase mb-2">Semifinal Qualifiers</div>{getD(['M18','M19']).map(m => <MB key={m.id} match={m} indicatorColor="border-l-pink-500" />)}</div>
                 <div className="flex flex-col gap-12 justify-center h-full border-l border-slate-800/50 pl-12 relative"><div className="text-[10px] font-bold text-purple-500 tracking-widest uppercase mb-2 absolute top-0 -mt-6">Semifinals</div>{getD(['M20', 'M21']).map(m => <MB key={m.id} match={m} indicatorColor="border-l-purple-500" />)}</div>
-                <div className="flex flex-col items-center justify-center h-full border-l border-slate-800/50 pl-12 relative"><Trophy className="text-yellow-500 mb-4 scale-150 drop-shadow-[0_0_15px_rgba(250,204,21,0.5)]"/><div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2 absolute -top-6">Grand Final</div><MB match={getD(['M22'])[0]} indicatorColor="border-l-yellow-500" />
+                <div className="flex flex-col items-center justify-center h-full border-l border-slate-800/50 pl-12 relative"><Trophy className="sf-trophy text-yellow-500 mb-4 scale-150"/><div className="text-[10px] font-bold text-yellow-500 tracking-widest uppercase mb-2 absolute -top-6">Grand Final</div><MB match={getD(['M22'])[0]} indicatorColor="border-l-yellow-500" />
                    {getD(['M22'])[0]?.winnerId && ( <div className="mt-8 text-center animate-in fade-in zoom-in"><div className="text-yellow-400 font-black text-xl uppercase tracking-widest">Doubles Champion</div><div className="text-white font-bold text-lg mt-1">{state.teams.find(t=>t.id===getD(['M22'])[0].winnerId)?.player1} & {state.teams.find(t=>t.id===getD(['M22'])[0].winnerId)?.player2}</div></div> )}
                 </div>
               </div>
@@ -981,7 +1131,7 @@ const LiveScoring = ({ matchId, isSingles, onBack }) => {
           <h3 className="text-xl font-bold text-white text-center mb-1">{teamA.code}</h3>
           <p className="text-slate-500 text-sm text-center h-10">{teamA.player1} {!isSingles && <><br/>{teamA.player2}</>}</p>
           <div className="text-xs font-black tracking-widest uppercase text-emerald-500 mt-4 bg-emerald-500/10 px-4 py-1.5 rounded-md">Sets Won: {cGA}</div>
-          <div className="text-[120px] leading-none font-black text-white my-8 select-none">{currentGame.a}</div>
+          <div key={`a${currentGame.a}`} className="sf-bump text-[120px] leading-none font-black text-white my-8 select-none">{currentGame.a}</div>
           <div className="flex gap-4 w-full">
             <button onClick={() => handleScore('a', -1)} className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 rounded-xl text-2xl font-bold text-slate-300">-</button>
             <button onClick={() => handleScore('a', 1)} className="flex-[3] py-4 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-4xl font-bold text-white">+</button>
@@ -991,7 +1141,7 @@ const LiveScoring = ({ matchId, isSingles, onBack }) => {
           <h3 className="text-xl font-bold text-white text-center mb-1">{teamB.code}</h3>
           <p className="text-slate-500 text-sm text-center h-10">{teamB.player1} {!isSingles && <><br/>{teamB.player2}</>}</p>
           <div className="text-xs font-black tracking-widest uppercase text-blue-500 mt-4 bg-blue-500/10 px-4 py-1.5 rounded-md">Sets Won: {cGB}</div>
-          <div className="text-[120px] leading-none font-black text-white my-8 select-none">{currentGame.b}</div>
+          <div key={`b${currentGame.b}`} className="sf-bump text-[120px] leading-none font-black text-white my-8 select-none">{currentGame.b}</div>
           <div className="flex gap-4 w-full">
              <button onClick={() => handleScore('b', 1)} className="flex-[3] py-4 bg-blue-600 hover:bg-blue-500 rounded-xl text-4xl font-bold text-white">+</button>
              <button onClick={() => handleScore('b', -1)} className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 rounded-xl text-2xl font-bold text-slate-300">-</button>
@@ -1057,14 +1207,21 @@ const Dashboard = ({ mode, onNavigate }) => {
 
   return (
     <div className="space-y-6 animate-in fade-in">
-      <header className="mb-8"><h1 className="text-3xl font-black text-white tracking-tight uppercase">{state.settings.tournamentName}</h1><p className="text-slate-500 mt-1">Overview • {isSingles ? 'Singles VCT' : 'Doubles VCT'}</p></header>
+      <Reveal dir="zoom">
+        <header className="mb-8 relative">
+          <div className="text-[10px] font-black tracking-[0.35em] text-emerald-400/80 uppercase mb-3 flex items-center gap-2"><span className="sf-dot"></span>{fmtDate(today)}</div>
+          <h1 className="sf-gradient-text text-4xl md:text-6xl font-black tracking-tight uppercase leading-none">{state.settings.tournamentName}</h1>
+          <p className="text-slate-500 mt-3">Overview • {isSingles ? 'Singles VCT' : 'Doubles VCT'}</p>
+          <div className="sf-hero-line mt-5"></div>
+        </header>
+      </Reveal>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="flex flex-col items-center text-center p-4"><Users className="text-blue-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{isSingles ? state.singlesTeams.length : state.teams.length}</span><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">{isSingles ? 'Players' : 'Teams'}</span></Card>
-        <Card className="flex flex-col items-center text-center p-4"><CalendarDays className="text-purple-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{total}</span><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">Total Matches</span></Card>
-        <Card className="flex flex-col items-center text-center p-4 border-emerald-500/20 bg-emerald-500/5"><CheckCircle2 className="text-emerald-500 mb-3" size={24} /><span className="text-3xl font-black text-white">{completed}</span><span className="text-[10px] text-emerald-500/70 uppercase tracking-widest font-bold mt-1">Completed</span></Card>
-        <Card className="flex flex-col items-center text-center p-4 border-yellow-500/20 bg-yellow-500/5">
+        <Card reveal delay={0} className="flex flex-col items-center text-center p-4"><Users className="text-blue-500 mb-3" size={24} /><CountUp className="text-3xl font-black text-white" value={isSingles ? state.singlesTeams.length : state.teams.length} /><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">{isSingles ? 'Players' : 'Teams'}</span></Card>
+        <Card reveal delay={90} className="flex flex-col items-center text-center p-4"><CalendarDays className="text-purple-500 mb-3" size={24} /><CountUp className="text-3xl font-black text-white" value={total} /><span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">Total Matches</span></Card>
+        <Card reveal delay={180} className="flex flex-col items-center text-center p-4 border-emerald-500/20 bg-emerald-500/5"><CheckCircle2 className="text-emerald-500 mb-3" size={24} /><CountUp className="text-3xl font-black text-white" value={completed} /><span className="text-[10px] text-emerald-500/70 uppercase tracking-widest font-bold mt-1">Completed</span></Card>
+        <Card reveal delay={270} className="flex flex-col items-center text-center p-4 border-yellow-500/20 bg-yellow-500/5">
            <Activity className={`text-yellow-500 mb-3 ${live.length > 0 ? 'animate-pulse drop-shadow-[0_0_10px_rgba(234,179,8,0.8)]' : ''}`} size={24} />
-           <span className="text-3xl font-black text-white">{live.length}</span><span className="text-[10px] text-yellow-500/70 uppercase tracking-widest font-bold mt-1">Live Now</span>
+           <CountUp className="text-3xl font-black text-white" value={live.length} /><span className="text-[10px] text-yellow-500/70 uppercase tracking-widest font-bold mt-1">Live Now</span>
         </Card>
       </div>
 
@@ -1072,7 +1229,7 @@ const Dashboard = ({ mode, onNavigate }) => {
          <div className="mt-8 animate-in fade-in slide-in-from-bottom-4">
             <h3 className="text-sm font-bold text-yellow-500 uppercase tracking-widest mb-4 flex items-center gap-2"><Activity size={16}/> Active Match Status</h3>
             <div className="grid md:grid-cols-2 gap-4">
-               {live.map(match => {
+               {live.map((match, li) => {
                   const tA = findEntrant(state, isSingles, match.teamAId);
                   const tB = findEntrant(state, isSingles, match.teamBId);
                   let currentGameScore = match.liveGame || {a:0, b:0};
@@ -1080,7 +1237,7 @@ const Dashboard = ({ mode, onNavigate }) => {
                   let setsB = (match.scores || []).filter(s => checkGameWin(s.a, s.b, state.settings.pointsPerGame) && s.b > s.a).length;
 
                   return (
-                     <Card key={match.id} className="border-yellow-500/30 bg-gradient-to-br from-[#0a0a0a] to-[#0d0d00]">
+                     <Card key={match.id} reveal delay={li * 90} className="sf-live-glow border-yellow-500/30 bg-gradient-to-br from-[#0a0a0a] to-[#0d0d00]">
                         <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-800/80">
                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{match.title}{match.round ? ` • ${match.round}` : ''}</span>
                            <span className="text-[9px] font-bold px-2 py-1 rounded bg-red-500/10 text-red-500 uppercase tracking-widest animate-pulse">LIVE</span>
@@ -1119,7 +1276,7 @@ const Dashboard = ({ mode, onNavigate }) => {
         <div className="mt-8 animate-in fade-in slide-in-from-bottom-4">
           <h3 className="text-sm font-bold text-amber-400 uppercase tracking-widest mb-4 flex items-center gap-2"><CalendarDays size={16}/> Today's Matches • {fmtDate(today)}</h3>
           <div className="grid md:grid-cols-2 gap-4">
-            {todayMatches.map(match => <MiniMatch key={match.id} match={match} accent />)}
+            {todayMatches.map((match, i) => <Reveal key={match.id} delay={i * 90}><MiniMatch match={match} accent /></Reveal>)}
           </div>
         </div>
       )}
@@ -1134,7 +1291,7 @@ const Dashboard = ({ mode, onNavigate }) => {
         <div className="mt-8 animate-in fade-in">
           <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><ArrowRight size={16}/> Next Matchday • {fmtDate(nextDate)}</h3>
           <div className="grid md:grid-cols-2 gap-4">
-            {nextMatches.map(match => <MiniMatch key={match.id} match={match} />)}
+            {nextMatches.map((match, i) => <Reveal key={match.id} delay={i * 90}><MiniMatch match={match} /></Reveal>)}
           </div>
         </div>
       )}
@@ -1152,8 +1309,8 @@ const Teams = () => {
         <div><h2 className="text-2xl font-bold text-white uppercase tracking-wider">Doubles Teams</h2><p className="text-slate-500 text-sm mt-1">12-Team VCT Roster</p></div>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {state.teams.map(team => (
-          <Card key={team.id} className="relative group hover:border-slate-700 transition-all">
+        {state.teams.map((team, i) => (
+          <Card key={team.id} reveal delay={(i % 8) * 60} className="relative group hover:border-slate-700 transition-all">
             {isSuperAdmin && ( <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => setEditingTeam(team)} className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"><Edit2 size={14}/></button></div> )}
             <div className="flex items-center gap-3 mb-4"><div className="w-10 h-10 bg-slate-800/50 rounded-full flex items-center justify-center font-black text-slate-300">{team.code}</div><div><div className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">Seed {team.seed}</div></div></div>
             <div className="space-y-1"><div className="font-semibold text-slate-200">{team.player1}</div><div className="text-[10px] text-slate-600 font-bold tracking-widest uppercase">AND</div><div className="font-semibold text-slate-200">{team.player2}</div></div>
@@ -1216,7 +1373,7 @@ const HallOfFame = () => {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in">
-      <header className="mb-8 text-center flex flex-col items-center"><Medal className="text-yellow-500 mb-4" size={48} /><h2 className="text-3xl font-black text-white uppercase">Hall of Fame</h2></header>
+      <header className="mb-8 text-center flex flex-col items-center"><Medal className="sf-float text-yellow-500 mb-4" size={48} /><h2 className="text-3xl font-black text-white uppercase">Hall of Fame</h2></header>
       {loading ? <div className="text-center text-slate-600 font-mono tracking-widest text-xs py-12 animate-pulse">LOADING LEGENDS...</div> : history.length === 0 ? <Card className="text-center py-12 text-slate-600 font-mono tracking-widest text-xs uppercase border-dashed border-slate-800">No tournaments published yet.</Card> : (
         <div className="grid gap-6">
           {history.map(t => (
@@ -1250,6 +1407,29 @@ const AppLayout = () => {
   const [showLogin, setShowLogin] = useState(false);
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState('DOUBLES');
+  const mainRef = useRef(null);
+  const barRef = useRef(null);
+  const blobsRef = useRef(null);
+  const rafRef = useRef(0);
+  const [showTop, setShowTop] = useState(false);
+
+  // Scroll-linked effects: progress bar, parallax background, back-to-top button
+  const onScroll = () => {
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = 0;
+      const el = mainRef.current;
+      if (!el) return;
+      const max = el.scrollHeight - el.clientHeight;
+      const p = max > 0 ? el.scrollTop / max : 0;
+      if (barRef.current) barRef.current.style.transform = `scaleX(${p})`;
+      if (blobsRef.current) blobsRef.current.style.transform = `translate3d(0, ${-el.scrollTop * 0.12}px, 0)`;
+      const next = el.scrollTop > 400;
+      setShowTop(prev => (prev === next ? prev : next));
+    });
+  };
+  useEffect(() => { if (mainRef.current) mainRef.current.scrollTo({ top: 0 }); }, [activeTab]);
+  useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
   const dialog = useDialog();
 
   const handleNav = (tab, matchId = null) => { setActiveTab(tab); if(matchId) setActiveMatchId(matchId); };
@@ -1277,10 +1457,11 @@ const AppLayout = () => {
   const doLogout = () => { setIsAdmin(false); setIsSuperAdmin(false); handleNav('dashboard'); };
 
   return (
-    <div className="flex h-screen bg-[#050505] text-slate-300 font-sans selection:bg-emerald-500/30">
+    <div className="sf-root flex h-screen bg-[#050505] text-slate-300 font-sans selection:bg-emerald-500/30">
+      <GlobalStyles />
       <SyncBadge />
-      <aside className="hidden md:flex flex-col w-64 border-r border-slate-800/80 bg-[#020202]">
-        <div className="p-6 pb-2"><div className="flex items-center gap-3 text-white font-black text-xl tracking-tighter"><Shield className="text-red-600" size={24}/>SMASHFEST <span className="text-red-600">'26</span></div></div>
+      <aside className="hidden md:flex flex-col w-64 border-r border-slate-800/80 bg-[#020202] relative z-20">
+        <div className="p-6 pb-2"><div className="flex items-center gap-3 text-white font-black text-xl tracking-tighter"><Shield className="sf-shield text-red-600" size={24}/>SMASHFEST <span className="text-red-600">'26</span></div></div>
 
         <div className="px-6 mb-8 mt-4">
           <div className="flex items-center bg-[#0a0a0a] rounded-lg p-1 border border-slate-800 shadow-inner">
@@ -1304,7 +1485,7 @@ const AppLayout = () => {
              <div key={grp.label}>
                 <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2 pl-4">{grp.label}</div>
                 <div className="space-y-1">
-                  {grp.items.map(n => <button key={n.id} onClick={()=>handleNav(n.id)} className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all text-sm font-medium ${activeTab===n.id?'bg-slate-800/50 text-white shadow-sm border border-slate-700/50':'hover:bg-[#0a0a0a] text-slate-400'}`}><n.i size={16} className={activeTab===n.id?'text-emerald-500':''}/>{n.l}</button>)}
+                  {grp.items.map(n => <button key={n.id} onClick={()=>handleNav(n.id)} className={`relative w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 text-sm font-medium ${activeTab===n.id?'bg-slate-800/50 text-white shadow-sm border border-slate-700/50':'hover:bg-[#0a0a0a] hover:translate-x-1 text-slate-400'}`}>{activeTab===n.id && <span className="sf-nav-bar"></span>}<n.i size={16} className={activeTab===n.id?'text-emerald-500':''}/>{n.l}</button>)}
                 </div>
              </div>
           ))}
@@ -1315,7 +1496,9 @@ const AppLayout = () => {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto overflow-x-hidden pb-24 md:pb-0 relative">
+      <main ref={mainRef} onScroll={onScroll} className="flex-1 overflow-y-auto overflow-x-hidden pb-24 md:pb-0 relative">
+        <div ref={barRef} className="sf-progress"></div>
+        <div ref={blobsRef} className="sf-blobs" aria-hidden="true"><span></span><span></span><span></span></div>
         {/* Mobile header: mode switch + admin login */}
         <div className="md:hidden sticky top-0 z-30 bg-[#050505]/95 backdrop-blur border-b border-slate-800/80 px-4 py-3 flex items-center gap-3">
           <div className="flex items-center bg-[#0a0a0a] rounded-lg p-1 border border-slate-800">
@@ -1327,7 +1510,7 @@ const AppLayout = () => {
            : <button onClick={() => setShowLogin(true)} className="p-2 rounded-lg bg-slate-800/50 text-slate-300 border border-slate-700/50"><Lock size={14}/></button>}
         </div>
 
-        <div className="max-w-7xl mx-auto p-4 md:p-8 pt-8 md:pt-12">
+        <div key={activeTab} className="sf-page relative z-10 max-w-7xl mx-auto p-4 md:p-8 pt-8 md:pt-12">
           {activeTab === 'dashboard' && <Dashboard mode={mode} onNavigate={handleNav} />}
           {activeTab === 'schedule' && <Schedule mode={mode} onNavigate={handleNav} />}
           {activeTab === 'standings' && <Standings mode={mode} />}
@@ -1343,6 +1526,12 @@ const AppLayout = () => {
           {activeTab === 'settings' && isAdmin && <Settings />}
         </div>
       </main>
+
+      {/* Back to top */}
+      <button type="button" aria-label="Back to top" onClick={() => mainRef.current && mainRef.current.scrollTo({ top: 0, behavior: 'smooth' })}
+        className={`fixed right-4 bottom-20 md:bottom-6 z-40 p-3 rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-900/40 hover:bg-emerald-500 transition-all duration-300 ${showTop ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
+        <ChevronUp size={18} />
+      </button>
 
       {/* Mobile bottom navigation */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-[#020202]/95 backdrop-blur border-t border-slate-800/80 flex overflow-x-auto">
