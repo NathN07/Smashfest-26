@@ -48,6 +48,10 @@ const todayKey = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+const addDays = (dateStr, n) => {
+  const d = new Date((dateStr || todayKey()) + 'T00:00:00'); d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }) : 'No date';
 const fmtDateShort = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : 'No date';
 
@@ -197,12 +201,29 @@ const getMatchWinner = (scores, bestOf, pointsPerGame) => {
   if (gamesA >= req) return 'A'; if (gamesB >= req) return 'B'; return null;
 };
 
-// --- SINGLES CASCADE LOGIC (Untouched) ---
-const cascadeSingles = (matches, byeId) => {
+// Built-in singles matches whose players are filled automatically from earlier results
+const SINGLES_AUTO = new Set([
+  ...Array.from({ length: 10 }, (_, i) => `W${i + 1}`),
+  ...Array.from({ length: 17 }, (_, i) => `L${i + 1}`),
+  'SF1', 'SF2', 'GF'
+]);
+
+// Any non-bye match whose stored result no longer fits its players goes back to "upcoming"
+// (happens when an earlier match is changed / reset / deleted).
+const sanitizeMatch = (m) => {
+  if (m.isBye || m.status === 'upcoming') return m;
+  const both = m.teamAId && m.teamBId;
+  if (m.status === 'live') return both ? m : { ...m, status: 'upcoming', scores: [], winnerId: null, liveGame: null };
+  const winnerOk = m.winnerId && (m.winnerId === m.teamAId || m.winnerId === m.teamBId);
+  return both && winnerOk ? m : { ...m, status: 'upcoming', scores: [], winnerId: null, liveGame: null };
+};
+
+// --- SINGLES CASCADE LOGIC ---
+const cascadeSinglesOnce = (matches, byeId) => {
   let nm = [...matches];
   const w = (id) => nm.find(m=>m.id===id)?.winnerId || null;
   const l = (id) => { const m = nm.find(m=>m.id===id); return m && m.winnerId ? (m.winnerId === m.teamAId ? m.teamBId : m.teamAId) : null; };
-  const set = (id, a, b) => { nm = nm.map(m => m.id === id ? { ...m, teamAId: a !== undefined ? a : m.teamAId, teamBId: b !== undefined ? b : m.teamBId } : m); };
+  const set = (id, a, b) => { nm = nm.map(m => m.id === id ? { ...m, teamAId: (a !== undefined && !m.manualA) ? a : m.teamAId, teamBId: (b !== undefined && !m.manualB) ? b : m.teamBId } : m); };
 
   set('W1', w('M1'), w('M2')); set('L1', l('M1'), l('M2')); set('W2', w('M3'), w('M4')); set('L2', l('M3'), l('M4'));
   set('W3', w('M5'), w('M6')); set('L3', l('M5'), l('M6')); set('W4', w('M7'), w('M8')); set('L4', l('M7'), l('M8'));
@@ -218,6 +239,24 @@ const cascadeSingles = (matches, byeId) => {
      set('W10', others[0] || null, others[1] || null); set('SF1', byeId, w('L17'));
   } else { set('W10', null, null); set('SF1', null, w('L17')); }
   set('SF2', w('W10'), w('L16')); set('GF', w('SF1'), w('SF2'));
+
+  // Custom matches can be linked to any other match ("Winner of X" / "Loser of X")
+  if (nm.some(m => m.srcA || m.srcB)) {
+    for (let pass = 0; pass < 3; pass++) {
+      nm = nm.map(m => {
+        let r = m;
+        if (m.srcA && !m.manualA) { const v = resolveSrc(nm, m.srcA); if (v !== m.teamAId) r = { ...r, teamAId: v }; }
+        if (m.srcB && !m.manualB) { const v = resolveSrc(nm, m.srcB); if (v !== m.teamBId) r = { ...r, teamBId: v }; }
+        return r;
+      });
+    }
+  }
+  return nm;
+};
+
+const cascadeSingles = (matches, byeId) => {
+  let nm = matches;
+  for (let i = 0; i < 8; i++) nm = cascadeSinglesOnce(nm, byeId).map(sanitizeMatch);
   return nm;
 };
 
@@ -233,7 +272,7 @@ const resolveSrc = (list, src) => {
 
 const cascadeDoubles = (matches) => {
   const nm = matches.map(m => ({ ...m }));
-  for (let pass = 0; pass < 2; pass++) {
+  for (let pass = 0; pass < 8; pass++) {
     for (let i = 0; i < nm.length; i++) {
       const m = nm[i];
       if (m.srcA && !m.manualA) m.teamAId = resolveSrc(nm, m.srcA);
@@ -242,6 +281,7 @@ const cascadeDoubles = (matches) => {
         if (m.teamAId) { m.status = 'completed'; m.winnerId = m.teamAId; m.scores = []; m.liveGame = null; }
         else { m.status = 'upcoming'; m.winnerId = null; m.scores = []; }
       }
+      nm[i] = sanitizeMatch(m);
     }
   }
   return nm;
@@ -258,7 +298,7 @@ const tournamentReducer = (state, action) => {
         merged.doublesVersion = DOUBLES_VERSION;
       }
       merged.matches = cascadeDoubles(merged.matches);
-      merged.singlesMatches = (merged.singlesMatches || []).map(normalizeSinglesMatch);
+      merged.singlesMatches = cascadeSingles((merged.singlesMatches || []).map(normalizeSinglesMatch), merged.singlesByeId);
       return merged;
     }
     case 'UPDATE_MATCH': {
@@ -277,13 +317,30 @@ const tournamentReducer = (state, action) => {
       const list = [...state[key]];
       const idx = afterId ? list.findIndex(m => m.id === afterId) : -1;
       if (idx >= 0) list.splice(idx + 1, 0, match); else list.push(match);
-      return { ...state, [key]: isSingles ? list : cascadeDoubles(list) };
+      return { ...state, [key]: isSingles ? cascadeSingles(list, state.singlesByeId) : cascadeDoubles(list) };
+    }
+    case 'ADD_MATCHES': {
+      const { isSingles, matches } = action.payload;
+      const key = isSingles ? 'singlesMatches' : 'matches';
+      const list = [...state[key], ...matches];
+      return { ...state, [key]: isSingles ? cascadeSingles(list, state.singlesByeId) : cascadeDoubles(list) };
+    }
+    case 'DELETE_STAGE': {
+      const { isSingles, stage } = action.payload;
+      const key = isSingles ? 'singlesMatches' : 'matches';
+      const list = state[key].filter(m => !(m.custom && m.stage === stage));
+      return { ...state, [key]: isSingles ? cascadeSingles(list, state.singlesByeId) : cascadeDoubles(list) };
+    }
+    case 'RENAME_STAGE': {
+      const { isSingles, from, to } = action.payload;
+      const key = isSingles ? 'singlesMatches' : 'matches';
+      return { ...state, [key]: state[key].map(m => (m.custom && m.stage === from) ? { ...m, stage: to } : m) };
     }
     case 'DELETE_MATCH': {
       const { isSingles, id } = action.payload;
       const key = isSingles ? 'singlesMatches' : 'matches';
-      const list = state[key].filter(m => !(m.id === id && m.custom));
-      return { ...state, [key]: isSingles ? list : cascadeDoubles(list) };
+      const list = state[key].filter(m => m.id !== id);
+      return { ...state, [key]: isSingles ? cascadeSingles(list, state.singlesByeId) : cascadeDoubles(list) };
     }
     case 'UPDATE_SINGLES_TEAM': {
       return { ...state, singlesTeams: state.singlesTeams.map(t => t.id === action.payload.id ? action.payload : t) };
@@ -559,6 +616,9 @@ const MatchCard = ({ match, isSingles, indicatorColor, onNavigate, onEdit, full 
   const tA = findEntrant(state, isSingles, match.teamAId);
   const tB = findEntrant(state, isSingles, match.teamBId);
   const isToday = match.date && match.date === todayKey();
+  const allMatches = isSingles ? state.singlesMatches : state.matches;
+  const slotText = (t, src) => t ? entrantName(t, isSingles)
+    : (src && src.t !== 'BYE' ? `${src.t === 'W' ? 'Winner' : 'Loser'} of ${allMatches.find(x => x.id === src.m)?.title || src.m}` : 'TBD');
   const scoreA = (match.scores || []).filter(s => s.a > s.b).length;
   const scoreB = (match.scores || []).filter(s => s.b > s.a).length;
 
@@ -575,7 +635,7 @@ const MatchCard = ({ match, isSingles, indicatorColor, onNavigate, onEdit, full 
         <div className="flex items-center gap-2 relative">
           <span className={`text-[9px] font-bold px-2 py-1 rounded uppercase tracking-wider ${match.status==='completed'?'bg-emerald-500/10 text-emerald-400':match.status==='live'?'bg-red-500/10 text-red-400':'bg-slate-800/50 text-slate-500'}`}>{match.isBye ? 'bye' : match.status}</span>
           {isSuperAdmin && (
-            <div className="absolute -right-2 -top-2 opacity-0 group-hover:opacity-100 flex gap-1 z-10">
+            <div className="absolute -right-2 -top-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 flex gap-1 z-10">
               {match.status !== 'upcoming' && !match.isBye && <button onClick={(e) => { e.stopPropagation(); dialog.confirm("Reset Match?", "Clear scores?", () => dispatch({type: updateType, payload: {id: match.id, updates: {status: 'upcoming', scores: [], winnerId: null, liveGame: null}}}), true); }} className="p-1 bg-red-900/40 text-red-400 hover:bg-red-900/60 rounded"><RotateCcw size={12}/></button>}
               <button onClick={(e) => { e.stopPropagation(); onEdit && onEdit(match); }} className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"><Edit2 size={12}/></button>
             </div>
@@ -584,12 +644,12 @@ const MatchCard = ({ match, isSingles, indicatorColor, onNavigate, onEdit, full 
       </div>
       <div className="space-y-3">
         <div className={`flex justify-between items-center ${match.winnerId && match.winnerId === match.teamAId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>
-          <span className="text-sm truncate pr-2">{entrantName(tA, isSingles)} <span className="text-[10px] opacity-40 ml-1">({tA?.code||'-'})</span></span>
+          <span className={`text-sm truncate pr-2 ${!tA ? 'text-slate-500 italic' : ''}`}>{slotText(tA, match.srcA)} {tA && <span className="text-[10px] opacity-40 ml-1">({tA.code})</span>}</span>
           {match.status === 'completed' && match.teamAId && !match.isBye && <span className="text-sm font-bold">{scoreA}</span>}
         </div>
         <div className="h-px bg-slate-800/50"></div>
         <div className={`flex justify-between items-center ${match.winnerId && match.winnerId === match.teamBId ? 'text-emerald-400 font-bold' : 'text-slate-300'}`}>
-          <span className="text-sm truncate pr-2">{match.isBye ? 'BYE' : entrantName(tB, isSingles)} {!match.isBye && <span className="text-[10px] opacity-40 ml-1">({tB?.code||'-'})</span>}</span>
+          <span className={`text-sm truncate pr-2 ${!tB && !match.isBye ? 'text-slate-500 italic' : ''}`}>{match.isBye ? 'BYE' : slotText(tB, match.srcB)} {tB && !match.isBye && <span className="text-[10px] opacity-40 ml-1">({tB.code})</span>}</span>
           {match.status === 'completed' && match.teamBId && !match.isBye && <span className="text-sm font-bold">{scoreB}</span>}
         </div>
       </div>
@@ -605,66 +665,115 @@ const MatchCard = ({ match, isSingles, indicatorColor, onNavigate, onEdit, full 
   );
 };
 
-// ---------- SUPER ADMIN: EDIT MATCH (title, round, date, teams, delete) ----------
+// ---------- SUPER ADMIN: MATCH FORMS (edit / add / link matches into a flowchart) ----------
+const FIELD = "w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white";
+const LABEL = "block text-xs font-bold text-slate-500 mb-1";
+
+// One slot = a fixed player/team OR "Winner of <match>" / "Loser of <match>" (auto-fills when that match ends)
+const slotValue = (match, side) => {
+  const src = side === 'A' ? match.srcA : match.srcB;
+  const id = side === 'A' ? match.teamAId : match.teamBId;
+  if (src && src.t !== 'BYE') return `${src.t}:${src.m}`;
+  return id ? `T:${id}` : '';
+};
+const parseSlot = (v) => {
+  if (!v) return { team: null, src: null };
+  const [k, ...rest] = v.split(':'); const id = rest.join(':');
+  return k === 'T' ? { team: id, src: null } : { team: null, src: { t: k, m: id } };
+};
+const SlotSelect = ({ name, defaultValue, entrants, matches, isSingles, excludeId }) => {
+  const opts = matches.filter(m => m.id !== excludeId && !m.isBye);
+  return (
+    <select name={name} defaultValue={defaultValue} className={FIELD}>
+      <option value="">TBD</option>
+      <optgroup label={isSingles ? 'Players' : 'Teams'}>
+        {entrants.map(t => <option key={t.id} value={`T:${t.id}`}>{t.code} - {entrantName(t, isSingles)}</option>)}
+      </optgroup>
+      <optgroup label="Winner of…">{opts.map(m => <option key={'w' + m.id} value={`W:${m.id}`}>Winner of {m.title}</option>)}</optgroup>
+      <optgroup label="Loser of…">{opts.map(m => <option key={'l' + m.id} value={`L:${m.id}`}>Loser of {m.title}</option>)}</optgroup>
+    </select>
+  );
+};
+const stageNames = (matches) => [...new Set(matches.filter(m => m.custom && m.stage).map(m => m.stage))];
+
 const MatchEditModal = ({ match, isSingles, onClose }) => {
   const { state, dispatch } = useContext(TournamentContext);
   const dialog = useDialog();
   const entrants = isSingles ? state.singlesTeams : state.teams;
+  const matches = isSingles ? state.singlesMatches : state.matches;
   const updateType = isSingles ? 'UPDATE_SINGLES_MATCH' : 'UPDATE_MATCH';
-  const hasAutoA = !isSingles && match.srcA;
-  const hasAutoB = !isSingles && match.srcB;
+  const isCustom = !!match.custom;
+  const hasAutoA = !!(match.srcA || (isSingles && SINGLES_AUTO.has(match.id)));
+  const hasAutoB = !!(match.srcB || (isSingles && SINGLES_AUTO.has(match.id)));
   const defA = hasAutoA && !match.manualA ? '__auto' : (match.teamAId || '');
   const defB = hasAutoB && !match.manualB ? '__auto' : (match.teamBId || '');
+  const dlId = `stages-${match.id}`;
 
   const submit = (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    const vA = fd.get('teamAId'); const vB = fd.get('teamBId');
     const updates = { title: (fd.get('title') || '').trim() || match.title, round: (fd.get('round') || '').trim(), date: fd.get('date') || null };
     let changedTeams = false;
-    if (vA !== '__auto') {
-      const nA = vA || null;
-      if (nA !== match.teamAId) changedTeams = true;
-      updates.teamAId = nA; if (!isSingles) updates.manualA = !!match.srcA;
-    } else { updates.manualA = false; }
-    if (vB !== '__auto') {
-      const nB = vB || null;
-      if (nB !== match.teamBId) changedTeams = true;
-      updates.teamBId = nB; if (!isSingles) updates.manualB = !!match.srcB;
-    } else { updates.manualB = false; }
+
+    if (isCustom) {
+      const sA = parseSlot(fd.get('slotA')), sB = parseSlot(fd.get('slotB'));
+      changedTeams = fd.get('slotA') !== slotValue(match, 'A') || fd.get('slotB') !== slotValue(match, 'B');
+      Object.assign(updates, { srcA: sA.src, srcB: sB.src, manualA: false, manualB: false });
+      if (!sA.src) updates.teamAId = sA.team;
+      if (!sB.src) updates.teamBId = sB.team;
+      updates.stage = (fd.get('stage') || '').trim() || null;
+      updates.col = Math.max(1, parseInt(fd.get('col'), 10) || 1);
+      updates.noStandings = !fd.get('counts');
+    } else {
+      const vA = fd.get('teamAId'); const vB = fd.get('teamBId');
+      if (vA !== '__auto') {
+        const nA = vA || null;
+        if (nA !== match.teamAId) changedTeams = true;
+        updates.teamAId = nA; updates.manualA = hasAutoA;
+      } else { updates.manualA = false; }
+      if (vB !== '__auto') {
+        const nB = vB || null;
+        if (nB !== match.teamBId) changedTeams = true;
+        updates.teamBId = nB; updates.manualB = hasAutoB;
+      } else { updates.manualB = false; }
+    }
     if (changedTeams && match.status !== 'upcoming') { updates.status = 'upcoming'; updates.scores = []; updates.winnerId = null; updates.liveGame = null; }
     dispatch({ type: updateType, payload: { id: match.id, updates } });
     onClose();
   };
 
-  const sel = "w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white";
-  const lab = "block text-xs font-bold text-slate-500 mb-1";
+  const builtInSelect = (name, def, hasAuto, disabled) => (
+    <select name={name} defaultValue={def} className={FIELD} disabled={disabled}>
+      {hasAuto && <option value="__auto">Auto (from bracket)</option>}
+      <option value="">TBD</option>
+      {entrants.map(t => <option key={t.id} value={t.id}>{t.code} - {entrantName(t, isSingles)}</option>)}
+    </select>
+  );
+
   return (
     <Modal isOpen={true} onClose={onClose} title={`Edit ${match.title}`}>
       <form onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <div><label className={lab}>Match Label</label><input name="title" defaultValue={match.title} required className={sel} /></div>
-          <div><label className={lab}>Round / Stage</label><input name="round" defaultValue={match.round || ''} className={sel} /></div>
+          <div><label className={LABEL}>Match Label</label><input name="title" defaultValue={match.title} required className={FIELD} /></div>
+          <div><label className={LABEL}>Round / Stage Column</label><input name="round" defaultValue={match.round || ''} className={FIELD} /></div>
         </div>
-        <div><label className={lab}>Date</label><input type="date" name="date" defaultValue={match.date || ''} className={sel} /></div>
-        <div>
-          <label className={lab}>{isSingles ? 'Player 1' : 'Team A'}</label>
-          <select name="teamAId" defaultValue={defA} className={sel}>
-            {hasAutoA && <option value="__auto">Auto (from bracket)</option>}
-            <option value="">TBD</option>
-            {entrants.map(t => <option key={t.id} value={t.id}>{t.code} - {entrantName(t, isSingles)}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className={lab}>{isSingles ? 'Player 2' : 'Team B'}</label>
-          <select name="teamBId" defaultValue={defB} className={sel} disabled={!!match.isBye}>
-            {hasAutoB && <option value="__auto">Auto (from bracket)</option>}
-            <option value="">TBD</option>
-            {entrants.map(t => <option key={t.id} value={t.id}>{t.code} - {entrantName(t, isSingles)}</option>)}
-          </select>
-        </div>
+        <div><label className={LABEL}>Date</label><input type="date" name="date" defaultValue={match.date || ''} className={FIELD} /></div>
+        {isCustom ? (<>
+          <div><label className={LABEL}>{isSingles ? 'Player 1' : 'Team A'}</label><SlotSelect name="slotA" defaultValue={slotValue(match, 'A')} entrants={entrants} matches={matches} isSingles={isSingles} excludeId={match.id} /></div>
+          <div><label className={LABEL}>{isSingles ? 'Player 2' : 'Team B'}</label><SlotSelect name="slotB" defaultValue={slotValue(match, 'B')} entrants={entrants} matches={matches} isSingles={isSingles} excludeId={match.id} /></div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2"><label className={LABEL}>Flowchart / Stage (shows in Extra Stages tab)</label>
+              <input name="stage" list={dlId} defaultValue={match.stage || ''} placeholder="e.g. Playoffs" className={FIELD} />
+              <datalist id={dlId}>{stageNames(matches).map(s => <option key={s} value={s} />)}</datalist></div>
+            <div><label className={LABEL}>Column #</label><input type="number" min="1" name="col" defaultValue={match.col || 1} className={FIELD} /></div>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="counts" defaultChecked={!match.noStandings} /> Count this match in the Standings table</label>
+        </>) : (<>
+          <div><label className={LABEL}>{isSingles ? 'Player 1' : 'Team A'}</label>{builtInSelect('teamAId', defA, hasAutoA, false)}</div>
+          <div><label className={LABEL}>{isSingles ? 'Player 2' : 'Team B'}</label>{builtInSelect('teamBId', defB, hasAutoB, !!match.isBye)}</div>
+        </>)}
         <div className="flex gap-3 pt-2">
-          {match.custom && <Button variant="danger" icon={Trash2} onClick={() => dialog.confirm('Delete Match?', `${match.title} will be removed permanently.`, () => { dispatch({ type: 'DELETE_MATCH', payload: { isSingles, id: match.id } }); onClose(); }, true)}>Delete</Button>}
+          <Button variant="danger" icon={Trash2} onClick={() => dialog.confirm('Delete Match?', isCustom ? `${match.title} will be removed permanently.` : `${match.title} is part of the main bracket. Deleting it leaves any match that depends on it empty (TBD). Continue?`, () => { dispatch({ type: 'DELETE_MATCH', payload: { isSingles, id: match.id } }); onClose(); }, true)}>Delete</Button>
           <Button type="submit" className="flex-1">Save Changes</Button>
         </div>
       </form>
@@ -672,8 +781,7 @@ const MatchEditModal = ({ match, isSingles, onClose }) => {
   );
 };
 
-// ---------- SUPER ADMIN: ADD MATCH (anywhere in the list) ----------
-const AddMatchModal = ({ isSingles, onClose }) => {
+const AddMatchModal = ({ isSingles, onClose, defaultStage = '', defaultCol = 1 }) => {
   const { state, dispatch } = useContext(TournamentContext);
   const entrants = isSingles ? state.singlesTeams : state.teams;
   const matches = isSingles ? state.singlesMatches : state.matches;
@@ -681,46 +789,272 @@ const AddMatchModal = ({ isSingles, onClose }) => {
   const submit = (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const sA = parseSlot(fd.get('slotA')), sB = parseSlot(fd.get('slotB'));
+    const stage = (fd.get('stage') || '').trim() || null;
     const match = {
-      id: `X${Date.now().toString(36)}`, isSingles, custom: true,
+      id: `X${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`, isSingles, custom: true,
       title: (fd.get('title') || '').trim() || 'Extra Match',
-      round: (fd.get('round') || '').trim() || 'Extra',
+      round: (fd.get('round') || '').trim() || (stage ? `Round ${Math.max(1, parseInt(fd.get('col'), 10) || 1)}` : 'Extra'),
+      stage, col: Math.max(1, parseInt(fd.get('col'), 10) || 1), noStandings: !fd.get('counts'),
       date: fd.get('date') || null,
-      teamAId: fd.get('teamAId') || null, teamBId: fd.get('teamBId') || null,
-      srcA: null, srcB: null, manualA: false, manualB: false,
+      teamAId: sA.team, teamBId: sB.team, srcA: sA.src, srcB: sB.src, manualA: false, manualB: false,
       status: 'upcoming', scores: [], winnerId: null
     };
     dispatch({ type: 'ADD_MATCH', payload: { isSingles, match, afterId: fd.get('afterId') || null } });
     onClose();
   };
-  const sel = "w-full bg-[#050505] border border-slate-800 rounded-lg px-4 py-2 text-white";
-  const lab = "block text-xs font-bold text-slate-500 mb-1";
   return (
     <Modal isOpen={true} onClose={onClose} title="Add New Match">
       <form onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
-          <div><label className={lab}>Match Label</label><input name="title" placeholder="e.g. Exhibition 1" required className={sel} /></div>
-          <div><label className={lab}>Round / Stage</label><input name="round" placeholder="Extra" className={sel} /></div>
+          <div><label className={LABEL}>Match Label</label><input name="title" placeholder="e.g. Semi 1" required className={FIELD} /></div>
+          <div><label className={LABEL}>Round / Column Name</label><input name="round" placeholder="e.g. Semifinal" className={FIELD} /></div>
         </div>
-        <div><label className={lab}>Date</label><input type="date" name="date" defaultValue={todayKey()} className={sel} /></div>
-        <div><label className={lab}>{isSingles ? 'Player 1' : 'Team A'}</label>
-          <select name="teamAId" className={sel}><option value="">TBD</option>{entrants.map(t => <option key={t.id} value={t.id}>{t.code} - {entrantName(t, isSingles)}</option>)}</select></div>
-        <div><label className={lab}>{isSingles ? 'Player 2' : 'Team B'}</label>
-          <select name="teamBId" className={sel}><option value="">TBD</option>{entrants.map(t => <option key={t.id} value={t.id}>{t.code} - {entrantName(t, isSingles)}</option>)}</select></div>
-        <div><label className={lab}>Place it after</label>
-          <select name="afterId" defaultValue="" className={sel}><option value="">At the end</option>{matches.map(m => <option key={m.id} value={m.id}>{m.title}{m.round ? ` (${m.round})` : ''}</option>)}</select></div>
+        <div><label className={LABEL}>Date (any day — add as many days as you need)</label><input type="date" name="date" defaultValue={todayKey()} className={FIELD} /></div>
+        <div><label className={LABEL}>{isSingles ? 'Player 1' : 'Team A'}</label><SlotSelect name="slotA" defaultValue="" entrants={entrants} matches={matches} isSingles={isSingles} /></div>
+        <div><label className={LABEL}>{isSingles ? 'Player 2' : 'Team B'}</label><SlotSelect name="slotB" defaultValue="" entrants={entrants} matches={matches} isSingles={isSingles} /></div>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="col-span-2"><label className={LABEL}>Flowchart / Stage (optional)</label>
+            <input name="stage" list="add-stages" defaultValue={defaultStage} placeholder="Leave empty = schedule only" className={FIELD} />
+            <datalist id="add-stages">{stageNames(matches).map(s => <option key={s} value={s} />)}</datalist></div>
+          <div><label className={LABEL}>Column #</label><input type="number" min="1" name="col" defaultValue={defaultCol} className={FIELD} /></div>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="counts" defaultChecked /> Count this match in the Standings table</label>
+        <div><label className={LABEL}>Place it after (schedule order)</label>
+          <select name="afterId" defaultValue="" className={FIELD}><option value="">At the end</option>{matches.map(m => <option key={m.id} value={m.id}>{m.title}{m.round ? ` (${m.round})` : ''}</option>)}</select></div>
         <Button type="submit" className="w-full" icon={Plus}>Add Match</Button>
       </form>
     </Modal>
   );
 };
 
+// ---------- SUPER ADMIN: STAGE BUILDER (generates a whole knockout / round-robin in one go) ----------
+const seedOrder = (size) => { let o = [1]; while (o.length < size) { const n = o.length * 2; o = o.flatMap(s => [s, n + 1 - s]); } return o; };
+
+// Returns an array of matches (without dispatching). `seeds` = entrant ids, best first.
+const buildStageMatches = ({ format, name, seeds, startDate, perDay, counts, isSingles }) => {
+  const N = seeds.length; if (N < 2) return [];
+  const base = `X${Date.now().toString(36)}`;
+  let n = 0; const nid = () => `${base}${(n++).toString(36)}`;
+  const out = []; let day = 0;
+  const common = (id, title, round, col, a, b) => ({
+    id, isSingles, custom: true, title, round, stage: name, col, noStandings: !counts,
+    teamAId: a?.team || null, teamBId: b?.team || null, srcA: a?.src || null, srcB: b?.src || null,
+    manualA: false, manualB: false, status: 'upcoming', scores: [], winnerId: null
+  });
+  const place = (roundMatches) => {  // each round starts on a fresh day
+    roundMatches.forEach((m, i) => { m.date = addDays(startDate, day + Math.floor(i / perDay)); out.push(m); });
+    day += Math.max(1, Math.ceil(roundMatches.length / perDay));
+  };
+
+  if (format === 'roundrobin') {
+    const ids = [...seeds]; if (ids.length % 2) ids.push(null);
+    const rounds = ids.length - 1;
+    let arr = [...ids];
+    for (let r = 0; r < rounds; r++) {
+      const rm = []; let j = 1;
+      for (let i = 0; i < arr.length / 2; i++) {
+        const a = arr[i], b = arr[arr.length - 1 - i];
+        if (a && b) rm.push(common(nid(), `${name} MD${r + 1}-${j++}`, `Matchday ${r + 1}`, r + 1, { team: a }, { team: b }));
+      }
+      place(rm);
+      arr = [arr[0], arr[arr.length - 1], ...arr.slice(1, arr.length - 1)];
+    }
+    return out;
+  }
+
+  // knockout (single elimination, byes for non powers of two, seeded 1 vs last)
+  let size = 1; while (size < N) size *= 2;
+  let cur = seedOrder(size).map(s => (s <= N ? { team: seeds[s - 1] } : null));
+  const rounds = [];
+  while (cur.length > 1) {
+    const next = [], rm = [];
+    for (let i = 0; i < cur.length; i += 2) {
+      const a = cur[i], b = cur[i + 1];
+      if (!a && !b) { next.push(null); continue; }
+      if (!a || !b) { next.push(a || b); continue; }
+      const id = nid(); rm.push({ id, a, b }); next.push({ src: { t: 'W', m: id } });
+    }
+    rounds.push(rm); cur = next;
+  }
+  rounds.forEach((rm, ri) => {
+    const fromEnd = rounds.length - 1 - ri;
+    const roundName = fromEnd === 0 ? 'Final' : fromEnd === 1 ? 'Semifinal' : fromEnd === 2 ? 'Quarterfinal' : `Round ${ri + 1}`;
+    const abbr = fromEnd === 0 ? 'F' : fromEnd === 1 ? 'SF' : fromEnd === 2 ? 'QF' : `R${ri + 1}-`;
+    place(rm.map((m, i) => common(m.id, fromEnd === 0 ? `${name} Final` : `${name} ${abbr}${i + 1}`, roundName, ri + 1, m.a, m.b)));
+  });
+  return out;
+};
+
+const StageBuilderModal = ({ isSingles, onClose }) => {
+  const { state, dispatch } = useContext(TournamentContext);
+  const dialog = useDialog();
+  const entrants = isSingles ? state.singlesTeams : state.teams;
+  const matches = isSingles ? state.singlesMatches : state.matches;
+  const ranked = useMemo(() => computeStandings(entrants, matches, state.settings).map(r => r.t), [entrants, matches, state.settings]);
+  const [name, setName] = useState('');
+  const [format, setFormat] = useState('knockout');
+  const [startDate, setStartDate] = useState(todayKey());
+  const [perDay, setPerDay] = useState(4);
+  const [counts, setCounts] = useState(false);
+  const [sel, setSel] = useState(() => new Set(entrants.map(t => t.id)));
+  const [topN, setTopN] = useState(8);
+
+  const seeds = ranked.filter(t => sel.has(t.id)).map(t => t.id);   // seeded by current standings
+  const plan = buildStageMatches({ format, name: name.trim() || 'Stage', seeds, startDate, perDay: Math.max(1, +perDay || 1), counts, isSingles });
+  const lastDate = plan.length ? plan.map(m => m.date).sort().slice(-1)[0] : null;
+  const toggle = (id) => setSel(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return dialog.alert('Name needed', 'Give the stage a name.');
+    if (stageNames(matches).includes(name.trim())) return dialog.alert('Name already used', 'Pick a different stage name (or delete the old stage first).');
+    if (seeds.length < 2) return dialog.alert('Pick players', `Select at least 2 ${isSingles ? 'players' : 'teams'}.`);
+    dispatch({ type: 'ADD_MATCHES', payload: { isSingles, matches: plan } });
+    onClose();
+  };
+
+  return (
+    <Modal isOpen={true} onClose={onClose} title="New Stage / Flowchart">
+      <form onSubmit={submit} className="space-y-4">
+        <div><label className={LABEL}>Stage name</label><input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Playoffs, Day 5 League" className={FIELD} autoFocus /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className={LABEL}>Format</label>
+            <select value={format} onChange={e => { setFormat(e.target.value); setCounts(e.target.value === 'roundrobin'); }} className={FIELD}>
+              <option value="knockout">Knockout (flowchart)</option>
+              <option value="roundrobin">Round robin (league)</option>
+            </select></div>
+          <div><label className={LABEL}>First day</label><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className={FIELD} /></div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className={LABEL}>Matches per day</label><input type="number" min="1" value={perDay} onChange={e => setPerDay(e.target.value)} className={FIELD} /></div>
+          <label className="flex items-end gap-2 text-sm text-slate-300 pb-2"><input type="checkbox" checked={counts} onChange={e => setCounts(e.target.checked)} /> Count in Standings</label>
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+            <label className={LABEL + ' mb-0'}>{isSingles ? 'Players' : 'Teams'} ({sel.size} selected)</label>
+            <div className="flex items-center gap-2 text-xs">
+              <button type="button" className="text-emerald-400" onClick={() => setSel(new Set(entrants.map(t => t.id)))}>All</button>
+              <button type="button" className="text-slate-400" onClick={() => setSel(new Set())}>None</button>
+              <span className="text-slate-600">|</span>
+              <input type="number" min="2" value={topN} onChange={e => setTopN(e.target.value)} className="w-14 bg-[#050505] border border-slate-800 rounded px-2 py-1 text-white" />
+              <button type="button" className="text-amber-400" onClick={() => setSel(new Set(ranked.slice(0, Math.max(2, +topN || 2)).map(t => t.id)))}>Top N by standings</button>
+            </div>
+          </div>
+          <div className="max-h-48 overflow-y-auto border border-slate-800 rounded-lg divide-y divide-slate-800/60">
+            {ranked.map((t, i) => (
+              <label key={t.id} className="flex items-center gap-3 px-3 py-2 text-sm text-slate-300 cursor-pointer hover:bg-slate-900/50">
+                <input type="checkbox" checked={sel.has(t.id)} onChange={() => toggle(t.id)} />
+                <span className="text-slate-600 w-5 text-right text-xs">{i + 1}</span>
+                <span className="truncate">{entrantName(t, isSingles)}</span>
+              </label>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-600 mt-1">Seeding follows the current standings order (best = seed 1).</p>
+        </div>
+        <div className="text-xs text-slate-400 bg-slate-900/60 border border-slate-800 rounded-lg px-3 py-2">
+          {plan.length ? <>Will create <b className="text-white">{plan.length}</b> matches from <b className="text-white">{fmtDateShort(startDate)}</b> to <b className="text-white">{fmtDateShort(lastDate)}</b>. You can still edit, move or delete every match afterwards.</> : 'Select at least 2 to preview.'}
+        </div>
+        <Button type="submit" className="w-full" icon={Plus}>Create Stage</Button>
+      </form>
+    </Modal>
+  );
+};
+
+// ---------- EXTRA STAGES (extra flowcharts, shown as a tab inside each bracket page) ----------
+const StageSection = ({ stage, items, isSingles, onNavigate, onEdit, onAdd }) => {
+  const { state, dispatch, isSuperAdmin } = useContext(TournamentContext);
+  const dialog = useDialog();
+  const [renaming, setRenaming] = useState(false);
+  const [newName, setNewName] = useState(stage);
+  const cols = [...new Set(items.map(m => m.col || 1))].sort((a, b) => a - b);
+  const dates = items.map(m => m.date).filter(Boolean).sort();
+  const maxCol = cols[cols.length - 1];
+  const finals = items.filter(m => (m.col || 1) === maxCol);
+  const champ = finals.length === 1 && finals[0].winnerId ? findEntrant(state, isSingles, finals[0].winnerId) : null;
+
+  return (
+    <div className="border border-slate-800/70 rounded-2xl p-5 bg-[#070707]">
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        {renaming ? (
+          <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); const to = newName.trim(); if (to && to !== stage) dispatch({ type: 'RENAME_STAGE', payload: { isSingles, from: stage, to } }); setRenaming(false); }}>
+            <input value={newName} onChange={e => setNewName(e.target.value)} autoFocus className="bg-[#050505] border border-slate-700 rounded px-2 py-1 text-white text-sm" />
+            <Button type="submit" className="py-1 px-3 text-xs">Save</Button>
+          </form>
+        ) : <h3 className="text-lg font-black text-sky-400 uppercase tracking-widest">{stage}</h3>}
+        <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{items.length} matches{dates.length ? ` • ${fmtDateShort(dates[0])}${dates[dates.length - 1] !== dates[0] ? ` → ${fmtDateShort(dates[dates.length - 1])}` : ''}` : ''}</span>
+        <div className="flex-1" />
+        {isSuperAdmin && (
+          <div className="flex gap-2">
+            <Button variant="secondary" icon={Plus} className="py-1 px-3 text-xs" onClick={() => onAdd(stage, maxCol)}>Match</Button>
+            <Button variant="secondary" icon={Edit2} className="py-1 px-3 text-xs" onClick={() => { setNewName(stage); setRenaming(r => !r); }}>Rename</Button>
+            <Button variant="danger" icon={Trash2} className="py-1 px-3 text-xs" onClick={() => dialog.confirm('Delete stage?', `All ${items.length} matches in "${stage}" will be removed.`, () => dispatch({ type: 'DELETE_STAGE', payload: { isSingles, stage } }), true)}>Delete stage</Button>
+          </div>
+        )}
+      </div>
+      <div className="overflow-x-auto pb-4">
+        <div className="min-w-max flex gap-8">
+          {cols.map(c => {
+            const ms = items.filter(m => (m.col || 1) === c);
+            return (
+              <div key={c} className="flex flex-col justify-around gap-4">
+                <div className="text-[10px] font-bold text-sky-500 tracking-widest uppercase mb-2">{ms[0]?.round || `Round ${c}`}</div>
+                {ms.map(m => <Reveal key={m.id}><MatchCard match={m} isSingles={isSingles} indicatorColor="border-l-sky-500" onNavigate={onNavigate} onEdit={onEdit} /></Reveal>)}
+              </div>
+            );
+          })}
+          {champ && (
+            <div className="flex flex-col items-center justify-center pl-8 border-l border-slate-800/60">
+              <Trophy className="text-yellow-500 mb-3" size={36} />
+              <div className="text-yellow-400 font-black uppercase tracking-widest text-sm">Stage Winner</div>
+              <div className="text-white font-bold mt-1">{entrantName(champ, isSingles)}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StagesView = ({ isSingles, onNavigate }) => {
+  const { state, isSuperAdmin } = useContext(TournamentContext);
+  const [editing, setEditing] = useState(null);
+  const [adding, setAdding] = useState(null);   // { stage, col }
+  const [building, setBuilding] = useState(false);
+  const matches = isSingles ? state.singlesMatches : state.matches;
+  const stages = stageNames(matches);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-slate-500 text-sm flex-1 min-w-[220px]">Extra flowcharts for more days: playoffs, bonus rounds, extra leagues. Every match here can be edited, moved to another day, linked ("Winner of …") or deleted.</p>
+        {isSuperAdmin && <>
+          <Button icon={Plus} onClick={() => setBuilding(true)}>New Stage</Button>
+          <Button variant="secondary" icon={Plus} onClick={() => setAdding({ stage: '', col: 1 })}>Add Match</Button>
+        </>}
+      </div>
+      {stages.length === 0 && (
+        <div className="border border-dashed border-slate-800 rounded-2xl p-10 text-center text-slate-500 text-sm">
+          No extra stages yet.{isSuperAdmin ? ' Click “New Stage” to auto-generate a knockout or league, or “Add Match” to build one by hand.' : ''}
+        </div>
+      )}
+      {stages.map(s => (
+        <StageSection key={s} stage={s} items={matches.filter(m => m.custom && m.stage === s)} isSingles={isSingles}
+          onNavigate={onNavigate} onEdit={setEditing} onAdd={(stage, col) => setAdding({ stage, col })} />
+      ))}
+      {isSuperAdmin && editing && <MatchEditModal match={editing} isSingles={isSingles} onClose={() => setEditing(null)} />}
+      {isSuperAdmin && adding && <AddMatchModal isSingles={isSingles} defaultStage={adding.stage} defaultCol={adding.col} onClose={() => setAdding(null)} />}
+      {isSuperAdmin && building && <StageBuilderModal isSingles={isSingles} onClose={() => setBuilding(false)} />}
+    </div>
+  );
+};
+
 // ---------- STANDINGS ----------
 const computeStandings = (entrants, matches, settings) => {
   const rows = {};
-  entrants.forEach(t => { rows[t.id] = { t, p: 0, w: 0, l: 0, sw: 0, sl: 0, pf: 0, pa: 0, pts: 0 }; });
+  entrants.forEach(t => { rows[t.id] = { t, p: 0, w: 0, l: 0, bl: 0, sw: 0, sl: 0, pf: 0, pa: 0, pts: 0 }; });
   matches.forEach(m => {
-    if (m.status !== 'completed' || m.isBye || !m.winnerId || !m.teamAId || !m.teamBId) return;
+    if (m.noStandings || m.status !== 'completed' || m.isBye || !m.winnerId || !m.teamAId || !m.teamBId) return;
     const a = rows[m.teamAId], b = rows[m.teamBId];
     if (!a || !b) return;
     let swA = 0, swB = 0, pa = 0, pb = 0;
@@ -731,6 +1065,7 @@ const computeStandings = (entrants, matches, settings) => {
     const win = m.winnerId === m.teamAId ? a : b;
     const lose = win === a ? b : a;
     win.w++; lose.l++;
+    if (!m.custom) lose.bl++;   // 'Eliminated' only counts main double-elimination losses
   });
   return Object.values(rows).map(r => ({ ...r, sd: r.sw - r.sl, pd: r.pf - r.pa, pts: r.w * settings.pointsWin + r.l * settings.pointsLoss }))
     .sort((x, y) => y.pts - x.pts || y.sd - x.sd || y.pd - x.pd || x.t.seed - y.t.seed);
@@ -763,7 +1098,7 @@ const Standings = ({ mode }) => {
             </thead>
             <tbody>
               {rows.map((r, i) => {
-                const out = r.l >= 2;
+                const out = r.bl >= 2;
                 return (
                   <tr key={r.t.id} style={{ '--d': `${Math.min(i, 14) * 45}ms` }} className={`sf-row border-b border-slate-800/50 ${i < 3 && r.p > 0 ? 'bg-emerald-500/5' : ''} ${out ? 'opacity-50' : ''}`}>
                     <td className="px-3 py-3 text-center font-black text-slate-400">{i + 1}</td>
@@ -802,6 +1137,7 @@ const Schedule = ({ mode, onNavigate }) => {
   const isSingles = mode === 'SINGLES';
   const [editing, setEditing] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [building, setBuilding] = useState(false);
   const matches = (isSingles ? state.singlesMatches : state.matches).filter(m => !m.isBye);
   const today = todayKey();
 
@@ -820,7 +1156,7 @@ const Schedule = ({ mode, onNavigate }) => {
           <h2 className="text-2xl font-bold text-white uppercase tracking-wider">Match Schedule</h2>
           <p className="text-slate-500 text-sm mt-1">{isSingles ? 'Singles' : 'Doubles'} • all fixtures by date</p>
         </div>
-        {isSuperAdmin && <Button icon={Plus} onClick={() => setAdding(true)}>Add Match</Button>}
+        {isSuperAdmin && <div className="flex gap-2"><Button variant="secondary" icon={Plus} onClick={() => setBuilding(true)}>New Stage</Button><Button icon={Plus} onClick={() => setAdding(true)}>Add Match</Button></div>}
       </div>
 
       {groups.map(g => (
@@ -843,6 +1179,7 @@ const Schedule = ({ mode, onNavigate }) => {
 
       {isSuperAdmin && editing && <MatchEditModal match={editing} isSingles={isSingles} onClose={() => setEditing(null)} />}
       {isSuperAdmin && adding && <AddMatchModal isSingles={isSingles} onClose={() => setAdding(false)} />}
+      {isSuperAdmin && building && <StageBuilderModal isSingles={isSingles} onClose={() => setBuilding(false)} />}
     </div>
   );
 };
@@ -949,11 +1286,12 @@ const SinglesBracket = ({ onNavigate }) => {
         </div>
       </div>
       <div className="flex gap-2 bg-[#0a0a0a] border border-slate-800 p-1 rounded-lg w-fit mb-6 overflow-x-auto">
-        {[{id: 'winner', l: '🟢 Winner Side', c: 'text-emerald-400'}, {id: 'loser', l: '🟠 Loser Side', c: 'text-orange-400'}, {id: 'finals', l: '🟣 Final Stages', c: 'text-purple-400'}].map(t => (
+        {[{id: 'winner', l: '🟢 Winner Side', c: 'text-emerald-400'}, {id: 'loser', l: '🟠 Loser Side', c: 'text-orange-400'}, {id: 'finals', l: '🟣 Final Stages', c: 'text-purple-400'}, {id: 'extra', l: '🔵 Extra Stages', c: 'text-sky-400'}].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} className={`px-4 py-2 rounded-md font-bold text-xs tracking-widest uppercase whitespace-nowrap transition-all ${tab === t.id ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-300'}`}><span className={tab===t.id?t.c:''}>{t.l}</span></button>
         ))}
       </div>
-      <div className="overflow-x-auto pb-12">
+      {tab === 'extra' && <div className="pb-12"><StagesView isSingles={true} onNavigate={onNavigate} /></div>}
+      <div className={`overflow-x-auto pb-12 ${tab === 'extra' ? 'hidden' : ''}`}>
         <div className="min-w-max flex gap-8">
           {tab === 'winner' && (
             <><div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Round 1 (24 Players)</div>{getS(['M1','M2','M3','M4','M5','M6','M7','M8','M9','M10','M11','M12']).map(m => <MB key={m?.id} match={m} indicatorColor="border-l-emerald-500" />)}</div>
@@ -1031,11 +1369,12 @@ const DoublesBracket = ({ onNavigate }) => {
         </div>
       </div>
       <div className="flex gap-2 bg-[#0a0a0a] border border-slate-800 p-1 rounded-lg w-fit mb-6 overflow-x-auto">
-        {[{id: 'winner', l: '🟢 Upper Bracket', c: 'text-emerald-400'}, {id: 'loser', l: '🟠 Lower Bracket', c: 'text-orange-400'}, {id: 'finals', l: '🟣 Semis & Finals', c: 'text-purple-400'}].map(t => (
+        {[{id: 'winner', l: '🟢 Upper Bracket', c: 'text-emerald-400'}, {id: 'loser', l: '🟠 Lower Bracket', c: 'text-orange-400'}, {id: 'finals', l: '🟣 Semis & Finals', c: 'text-purple-400'}, {id: 'extra', l: '🔵 Extra Stages', c: 'text-sky-400'}].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} className={`px-4 py-2 rounded-md font-bold text-xs tracking-widest uppercase whitespace-nowrap transition-all ${tab === t.id ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-300'}`}><span className={tab===t.id?t.c:''}>{t.l}</span></button>
         ))}
       </div>
-      <div className="overflow-x-auto pb-12">
+      {tab === 'extra' && <div className="pb-12"><StagesView isSingles={false} onNavigate={onNavigate} /></div>}
+      <div className={`overflow-x-auto pb-12 ${tab === 'extra' ? 'hidden' : ''}`}>
         <div className="min-w-max flex gap-8">
           {tab === 'winner' && (
             <><div className="flex flex-col gap-4"><div className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-2">Round 1 (6 Matches)</div>{getD(['M01','M02','M03','M04','M05','M06']).map(m => <MB key={m.id} match={m} indicatorColor="border-l-emerald-500" />)}</div>
